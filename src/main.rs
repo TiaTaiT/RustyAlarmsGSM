@@ -31,10 +31,12 @@ use crate::rtc::RtcControl;
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
+use static_cell::StaticCell;
 
 // --- Global Signals/Channels ---
 static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new();
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SimEvent, 4> = Channel::new();
+static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
 
 struct SystemState {
     alarm_stack: AlarmStack,
@@ -56,7 +58,7 @@ static RTC: Mutex<CriticalSectionRawMutex, Option<RtcControl>> = Mutex::new(None
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     // 1. Initialize new Hardware struct
-    let hw: Hardware = hardware::init();
+    let mut hw: Hardware = hardware::init();
     
     let mut leds = hw.leds;
     let sim_control = hw.modem_ctrl;
@@ -90,7 +92,29 @@ async fn main(spawner: Spawner) {
     spawner.spawn(logic_task(leds)).unwrap();
     
     spawner.spawn(system_monitor_task()).unwrap();
+
+    let driver = hw.usb_driver.take().unwrap();
+    spawner.spawn(usb_task(driver)).unwrap();
 }
+
+#[embassy_executor::task]
+   async fn usb_task(driver: hardware::BoardUsbDriver) {
+       let res = USB_STATE.init(hardware::UsbResources::new());
+       let (mut device, mut serial) = hardware::build_usb(driver, res);
+       embassy_futures::join::join(device.run(), async {
+           loop {
+               serial.wait_connection().await;
+               info!("USB connected");
+               let mut buf = [0u8; 64];
+               loop {
+                   match serial.read_packet(&mut buf).await {
+                       Ok(n)  => { serial.write_packet(&buf[..n]).await.ok(); }
+                       Err(_) => break,
+                   }
+               }
+           }
+       }).await;
+   }
 
 #[embassy_executor::task]
 async fn sim800_task(tx: hardware::ModemTx, rx: hardware::ModemRx, control: hardware::ModemControl) {
@@ -321,9 +345,11 @@ async fn visualize_common<F>(alarm_str: &str, mut set_output: F)
         }
         
         // Reset all off at end
+        /*
         for idx in 0..4 {
             set_output(idx, PowerState::Off);
         }
+        */
 }
 
 #[embassy_executor::task]

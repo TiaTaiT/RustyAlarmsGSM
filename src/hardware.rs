@@ -1,43 +1,56 @@
 // /src/hardware.rs
 // Hardware Abstraction Layer
-use embassy_stm32::adc::{Adc, SampleTime, AnyAdcChannel};
-use embassy_stm32::adc::AdcChannel; // <--- Fixed missing import for degrade_adc
+use embassy_stm32::adc::{Adc, AnyAdcChannel, SampleTime};
+use embassy_stm32::adc::AdcChannel; // Required for .degrade_adc()
 use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
 use embassy_stm32::mode::Async;
-use embassy_stm32::peripherals::{ADC1};
+use embassy_stm32::peripherals::{ADC1, USB};
 use embassy_stm32::rcc::{Hse, HseMode, Pll, PllDiv, PllMul, PllSource, Sysclk};
+use embassy_stm32::rcc::mux;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::usart::{Config as UartConfig, Uart, UartRx, UartTx};
-use embassy_stm32::{adc, bind_interrupts, usart, Config};
+use embassy_stm32::usb::Driver as UsbDriver;
+use embassy_stm32::{Config, adc, bind_interrupts, usart, usb};
+use embassy_usb::Builder as UsbBuilder;
+use embassy_usb::Config as UsbConfig;
+use embassy_usb::UsbDevice;
+use embassy_usb::class::cdc_acm::{CdcAcmClass, State as CdcState};
 use defmt::info;
 
 // --- Internal Interrupt Binding ---
 bind_interrupts!(struct Irqs {
     ADC1_COMP => adc::InterruptHandler<ADC1>;
-    USART1 => usart::InterruptHandler<embassy_stm32::peripherals::USART1>;
-    USART2 => usart::InterruptHandler<embassy_stm32::peripherals::USART2>;
+    USART1    => usart::InterruptHandler<embassy_stm32::peripherals::USART1>;
+    USART2    => usart::InterruptHandler<embassy_stm32::peripherals::USART2>;
+    USB       => usb::InterruptHandler<USB>;
 });
 
 // --- Public Type Aliases ---
 pub type ModemRx = UartRx<'static, Async>;
 pub type ModemTx = UartTx<'static, Async>;
 
+/// The concrete USB driver type for this board.
+pub type BoardUsbDriver = UsbDriver<'static, USB>;
+
+/// A ready-to-run USB CDC-ACM serial class.
+pub type UsbSerial<'d> = CdcAcmClass<'d, BoardUsbDriver>;
+
 // --- Enums ---
 #[derive(Copy, Clone, PartialEq)]
 pub enum PowerState {
     On,
-    Off
+    Off,
 }
 
-// Helper function to avoid borrow checker conflicts
+// Helper to avoid borrow-checker conflicts when mutating pins
 fn apply_state(pin: &mut Output<'static>, state: PowerState) {
     match state {
-        PowerState::On => pin.set_high(),
+        PowerState::On  => pin.set_high(),
         PowerState::Off => pin.set_low(),
     }
 }
 
-// --- Component: LEDs ---
+// --- Component: Status LEDs ---
 pub struct StatusLeds {
     sys_led: Output<'static>,
     gsm_led: Output<'static>,
@@ -47,11 +60,10 @@ pub struct StatusLeds {
 
 impl StatusLeds {
     pub fn set_system(&mut self, state: PowerState) { apply_state(&mut self.sys_led, state); }
-    pub fn set_gsm(&mut self, state: PowerState)    { apply_state(&mut self.gsm_led, state); }
-    pub fn set_error(&mut self, state: PowerState)  { apply_state(&mut self.err_led, state); }
+    pub fn set_gsm   (&mut self, state: PowerState) { apply_state(&mut self.gsm_led, state); }
+    pub fn set_error (&mut self, state: PowerState) { apply_state(&mut self.err_led, state); }
     pub fn set_action(&mut self, state: PowerState) { apply_state(&mut self.act_led, state); }
 
-    // Compatibility helper
     pub fn set_by_index(&mut self, index: usize, state: PowerState) {
         match index {
             1 => self.set_system(state),
@@ -65,21 +77,17 @@ impl StatusLeds {
 
 // --- Component: Modem Control ---
 pub struct ModemControl {
-    dc_power:   Output<'static>, 
-    power_key:  Output<'static>, 
-    uart_dtr:   Output<'static>, 
+    dc_power:  Output<'static>,
+    power_key: Output<'static>,
+    uart_dtr:  Output<'static>,
 }
 
 impl ModemControl {
-    pub fn set_power_key(&mut self, state: PowerState) {
-        apply_state(&mut self.power_key, state);
-    }
-
-    pub fn set_dc_power(&mut self, state: PowerState) {
-        apply_state(&mut self.dc_power, state);
-    }
+    pub fn set_power_key(&mut self, state: PowerState) { apply_state(&mut self.power_key, state); }
+    pub fn set_dc_power (&mut self, state: PowerState) { apply_state(&mut self.dc_power,  state); }
 }
 
+// --- Component: Alarm Relays (receiver only) ---
 #[cfg(feature = "receiver")]
 pub struct AlarmRelays {
     alarms: [Output<'static>; 4],
@@ -92,8 +100,7 @@ impl AlarmRelays {
             apply_state(&mut self.alarms[index], state);
         }
     }
-    
-    // Helper to clear all
+
     pub fn set_all(&mut self, state: PowerState) {
         for pin in self.alarms.iter_mut() {
             apply_state(pin, state);
@@ -101,17 +108,15 @@ impl AlarmRelays {
     }
 }
 
-// --- Component: Sensors ---
-// 2. System Sensors - Handles Inputs (ADC, Battery, Tamper)
-// In Transmitter mode, it ALSO handles the Alarm Inputs (ADC Channels)
+// --- Component: System Sensors ---
 pub struct SystemSensors {
     #[cfg(feature = "transmitter")]
     alarms: [AnyAdcChannel<'static, ADC1>; 4],
-    
-    adc: Adc<'static, ADC1>,
-    battery_pin: AnyAdcChannel<'static, ADC1>,
+
+    adc:            Adc<'static, ADC1>,
+    battery_pin:    AnyAdcChannel<'static, ADC1>,
     power_good_pin: Input<'static>,
-    tamper_pin: Input<'static>,
+    tamper_pin:     Input<'static>,
 }
 
 impl SystemSensors {
@@ -128,28 +133,99 @@ impl SystemSensors {
         self.adc.read(&mut self.battery_pin, SampleTime::CYCLES160_5).await
     }
 
-    pub fn is_power_connected(&mut self) -> bool {
-        self.power_good_pin.is_high()
-    }
+    pub fn is_power_connected(&self) -> bool { self.power_good_pin.is_high() }
+    pub fn is_housing_open   (&self) -> bool { self.tamper_pin.is_high()     }
+}
 
-    pub fn is_housing_open(&self) -> bool {
-        self.tamper_pin.is_high()
+/// Static buffers consumed by `embassy-usb`. Must live for `'static`.
+/// Allocate once via `StaticCell<UsbResources>`.
+pub struct UsbResources {
+    pub device_descriptor: [u8; 256],
+    pub config_descriptor: [u8; 256],
+    pub bos_descriptor:    [u8; 256],
+    pub msos_descriptor:   [u8; 256],
+    // NOTE: embassy-usb 0.5.1 Builder::new takes 6 args — no separate
+    // control_buf parameter; the msos_descriptor buffer doubles as control buf.
+    pub cdc_state:         CdcState<'static>,
+}
+
+impl UsbResources {
+    pub const fn new() -> Self {
+        Self {
+            device_descriptor: [0u8; 256],
+            config_descriptor: [0u8; 256],
+            bos_descriptor:    [0u8; 256],
+            msos_descriptor:   [0u8; 256],
+            cdc_state:         CdcState::new(),
+        }
     }
+}
+
+/// Construct a `UsbDevice` and CDC-ACM serial class from the raw driver.
+///
+/// Call once from your dedicated USB task (see usage comment above).
+/// Swap the VID/PID/strings for your own values before shipping.
+pub fn build_usb(
+    driver: BoardUsbDriver,
+    res: &'static mut UsbResources,
+) -> (UsbDevice<'static, BoardUsbDriver>, UsbSerial<'static>) {
+    // -----------------------------------------------------------------------
+    // IMPORTANT — USB clock on STM32L052:
+    // The USB peripheral requires a 48 MHz source. On the L052 this comes from
+    // the HSI48 oscillator (not the PLL). You must enable it in init():
+    //
+    //   use embassy_stm32::rcc::Hsi48Config;
+    //   config.rcc.hsi48 = Some(Hsi48Config { sync_from_usb: true });
+    //
+    // And add the "hsi48" feature to embassy-stm32 in Cargo.toml:
+    //   embassy-stm32 = { ..., features = [..., "hsi48"] }
+    //
+    // Without this the USB peripheral will not enumerate.
+    // -----------------------------------------------------------------------
+
+    let mut cfg = UsbConfig::new(
+        0x16c0, // VID — replace (see https://pid.codes for open-source projects)
+        0x27dd, // PID — replace
+    );
+    cfg.manufacturer  = Some("YourCompany");
+    cfg.product       = Some("CDC Serial");
+    cfg.serial_number = Some("00000001");
+    cfg.max_power         = 100; // mA draw reported to host (≤500 for bus-powered)
+    cfg.max_packet_size_0 = 64;
+
+    let mut builder = UsbBuilder::new(
+        driver,
+        cfg,
+        &mut res.device_descriptor,
+        &mut res.config_descriptor,
+        &mut res.bos_descriptor,
+        &mut res.msos_descriptor,
+    );
+
+    let serial = CdcAcmClass::new(&mut builder, &mut res.cdc_state, 64);
+    let device  = builder.build();
+
+    (device, serial)
 }
 
 // --- Main Hardware Struct ---
 pub struct Hardware {
-    pub sensors: SystemSensors,
+    pub sensors:    SystemSensors,
 
     #[cfg(feature = "receiver")]
-    pub relays: AlarmRelays,
+    pub relays:     AlarmRelays,
 
-    pub leds: StatusLeds,
+    pub leds:       StatusLeds,
     pub modem_ctrl: ModemControl,
-    pub modem_tx: ModemTx,
-    pub modem_rx: ModemRx,
-    // Debug UART is optional/unused in main, but initialized here
-    pub _debug_uart: Uart<'static, Async>, 
+    pub modem_tx:   ModemTx,
+    pub modem_rx:   ModemRx,
+
+    /// Raw USB driver. Take it out with `.take()` and pass to a spawned
+    /// `usb_task` — see the usage comment on `build_usb` above.
+    pub usb_driver: Option<BoardUsbDriver>,
+
+    // Debug UART — initialized but not actively used in the main task
+    pub _debug_uart: Uart<'static, Async>,
 }
 
 // --- Initialization ---
@@ -158,17 +234,21 @@ pub fn init() -> Hardware {
     config.rcc.hse = Some(Hse { freq: Hertz::mhz(4), mode: HseMode::Oscillator });
     config.rcc.pll = Some(Pll { source: PllSource::HSE, div: PllDiv::DIV2, mul: PllMul::MUL4 });
     config.rcc.sys = Sysclk::PLL1_R;
+    // The STM32L052 has no hsi48 field on rcc::Config — HSI48 is enabled
+    // implicitly by the embassy-stm32 RCC driver when you select it as the
+    // USB clock source via the mux. This is the correct approach for L0 family.
+    config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
 
     let p = embassy_stm32::init(config);
     info!("Hardware initialized! Clocked at 8 MHz");
 
-    // 1. Outputs
-    let _alarms_pullup = Output::new(p.PB1, Level::High, Speed::Low); 
-    
+    // --- Outputs ---
+    let _alarms_pullup = Output::new(p.PB1, Level::High, Speed::Low);
+
     let modem_ctrl = ModemControl {
-        dc_power:   Output::new(p.PB4, Level::High, Speed::Low),
-        power_key:  Output::new(p.PB6, Level::Low, Speed::Low),
-        uart_dtr:   Output::new(p.PB8, Level::Low, Speed::Low), 
+        dc_power:  Output::new(p.PB4, Level::High, Speed::Low),
+        power_key: Output::new(p.PB6, Level::Low,  Speed::Low),
+        uart_dtr:  Output::new(p.PB8, Level::Low,  Speed::Low),
     };
 
     let leds = StatusLeds {
@@ -178,38 +258,31 @@ pub fn init() -> Hardware {
         act_led: Output::new(p.PB15, Level::Low, Speed::Low),
     };
 
-    // 2. Comms
+    // --- UART ---
     let mut config_u1 = UartConfig::default();
     config_u1.baudrate = 115200;
     let _debug_uart = Uart::new(
-        p.USART1,
-        p.PA10,
-        p.PA9,
+        p.USART1, p.PA10, p.PA9,
         Irqs,
-        p.DMA1_CH2,
-        p.DMA1_CH3,
-        config_u1
+        p.DMA1_CH2, p.DMA1_CH3,
+        config_u1,
     ).unwrap();
 
     let mut config_u2 = UartConfig::default();
     config_u2.baudrate = 9600;
     let (modem_tx, modem_rx) = Uart::new(
-        p.USART2,
-        p.PA3,
-        p.PA2,
+        p.USART2, p.PA3, p.PA2,
         Irqs,
-        p.DMA1_CH4,
-        p.DMA1_CH5,
-        config_u2
+        p.DMA1_CH4, p.DMA1_CH5,
+        config_u2,
     ).unwrap().split();
 
-    // 3. Sensors
-    let adc = Adc::new(p.ADC1, Irqs);
-    let battery_pin = p.PB0.degrade_adc();
+    // --- ADC / Sensors ---
+    let adc            = Adc::new(p.ADC1, Irqs);
+    let battery_pin    = p.PB0.degrade_adc();
     let power_good_pin = Input::new(p.PB11, Pull::None);
-    let tamper_pin = Input::new(p.PB5, Pull::None);
+    let tamper_pin     = Input::new(p.PB5,  Pull::None);
 
-   // FEATURE-SPECIFIC ASSIGNMENT
     #[cfg(feature = "transmitter")]
     let sensors = SystemSensors {
         alarms: [
@@ -218,18 +291,12 @@ pub fn init() -> Hardware {
             p.PA6.degrade_adc(),
             p.PA7.degrade_adc(),
         ],
-        adc,
-        battery_pin,
-        power_good_pin,
-        tamper_pin,
+        adc, battery_pin, power_good_pin, tamper_pin,
     };
 
     #[cfg(feature = "receiver")]
     let sensors = SystemSensors {
-        adc,
-        battery_pin,
-        power_good_pin,
-        tamper_pin,
+        adc, battery_pin, power_good_pin, tamper_pin,
     };
 
     #[cfg(feature = "receiver")]
@@ -242,6 +309,10 @@ pub fn init() -> Hardware {
         ],
     };
 
+    // --- USB Driver ---
+    // STM32L052 USB pins: PA11 = D- (DM), PA12 = D+ (DP)
+    let usb_driver = UsbDriver::new(p.USB, Irqs, p.PA12, p.PA11);
+
     Hardware {
         sensors,
         #[cfg(feature = "receiver")]
@@ -250,6 +321,7 @@ pub fn init() -> Hardware {
         modem_ctrl,
         modem_tx,
         modem_rx,
+        usb_driver: Some(usb_driver),
         _debug_uart,
     }
 }
