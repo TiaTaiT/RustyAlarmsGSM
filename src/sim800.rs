@@ -64,6 +64,8 @@ pub struct Sim800Driver {
     line_buf: [u8; 128],
     last_alarm_dtmf: String<DTMF_PACKET_LENGTH>,
     last_alarm_time: u64,
+    usb_cmd_mode: bool,
+    usb_cmd_buf: String<64>,
 }
 
 impl Sim800Driver {
@@ -76,6 +78,8 @@ impl Sim800Driver {
             line_buf: [0u8; 128],
             last_alarm_dtmf: String::new(),
             last_alarm_time: 0,
+            usb_cmd_mode: false,
+            usb_cmd_buf: String::new(),
         }
     }
 
@@ -645,10 +649,35 @@ impl Sim800Driver {
                 }
                 Either3::Third(n) => {
                     if n > 0 {
-                        // Forward MAUI command to modem
-                        let _ = self.tx.write(&usb_rx_buf[..n]).await;
-                        // Echo it to the TX pipe so MAUI sees what it sent
-                        let _ = USB_TX_PIPE.try_write(&usb_rx_buf[..n]);
+                        for i in 0..n {
+                            let b = usb_rx_buf[i];
+                            let c = b as char;
+
+                            if !self.usb_cmd_mode && c == '_' {
+                                self.usb_cmd_mode = true;
+                                self.usb_cmd_buf.clear();
+                                self.usb_cmd_buf.push('_').ok();
+                                let _ = USB_TX_PIPE.try_write(&[b]);
+                            } else if self.usb_cmd_mode {
+                                let _ = USB_TX_PIPE.try_write(&[b]);
+                                if c == '\r' || c == '\n' {
+                                    if !self.usb_cmd_buf.is_empty() {
+                                        crate::execute_mcu_command(self.usb_cmd_buf.as_str()).await;
+                                        self.usb_cmd_buf.clear();
+                                    }
+                                    self.usb_cmd_mode = false;
+                                } else if c == '\x08' || c == '\x7f' {
+                                    self.usb_cmd_buf.pop();
+                                } else if self.usb_cmd_buf.len() < self.usb_cmd_buf.capacity() {
+                                    self.usb_cmd_buf.push(c).ok();
+                                }
+                            } else {
+                                // Forward MAUI command to modem
+                                let _ = self.tx.write(&[b]).await;
+                                // Echo it to the TX pipe so MAUI sees what it sent
+                                let _ = USB_TX_PIPE.try_write(&[b]);
+                            }
+                        }
                     }
                 }
             }

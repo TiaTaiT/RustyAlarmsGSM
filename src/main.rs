@@ -44,9 +44,11 @@ pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 struct SystemState {
     alarm_stack: AlarmStack,
     alive_countdown: i32,
-    // Add battery state tracking if needed
     battery_level: u16,
     tamper_detected: bool,
+    adc_values: [u16; 4],
+    current_alarms: [bool; 4],
+    power_connected: bool,
 }
 
 static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState {
@@ -54,6 +56,9 @@ static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemSta
     alive_countdown: 0,
     battery_level: 0,
     tamper_detected: false,
+    adc_values: [0; 4],
+    current_alarms: [false; 4],
+    power_connected: false,
 });
 
 static RTC: Mutex<CriticalSectionRawMutex, Option<RtcControl>> = Mutex::new(None);
@@ -161,17 +166,24 @@ async fn sim800_task(
 #[embassy_executor::task]
 async fn monitor_task(mut sensors: SystemSensors) {
     loop {
+        #[cfg(feature = "transmitter")]
+        let (values, bools) = {
+            let v = sensors.read_alarms().await;
+            let b = [
+                v[0] > LOW_INTRUSION_THRESHOLD && v[0] < HIGH_INTRUSION_THRESHOLD,
+                v[1] > LOW_INTRUSION_THRESHOLD && v[1] < HIGH_INTRUSION_THRESHOLD,
+                v[2] > LOW_INTRUSION_THRESHOLD && v[2] < HIGH_INTRUSION_THRESHOLD,
+                v[3] > LOW_INTRUSION_THRESHOLD && v[3] < HIGH_INTRUSION_THRESHOLD,
+            ];
+            (v, b)
+        };
+
+        #[cfg(not(feature = "transmitter"))]
+        let (values, bools) = ([0u16; 4], [false; 4]);
+
         // Transmitter: Read Alarms
         #[cfg(feature = "transmitter")]
         {
-            let values = sensors.read_alarms().await;
-            let bools = [
-                values[0] > LOW_INTRUSION_THRESHOLD && values[0] < HIGH_INTRUSION_THRESHOLD,
-                values[1] > LOW_INTRUSION_THRESHOLD && values[1] < HIGH_INTRUSION_THRESHOLD,
-                values[2] > LOW_INTRUSION_THRESHOLD && values[2] < HIGH_INTRUSION_THRESHOLD,
-                values[3] > LOW_INTRUSION_THRESHOLD && values[3] < HIGH_INTRUSION_THRESHOLD,
-            ];
-
             let mut state = STATE.lock().await;
             state.alarm_stack.push(&bools);
         }
@@ -179,14 +191,18 @@ async fn monitor_task(mut sensors: SystemSensors) {
         // Both: Read System health
         let battery = sensors.read_battery_voltage().await;
         let tamper = sensors.is_housing_open();
+        let power = sensors.is_power_connected();
 
         {
             let mut state = STATE.lock().await;
+            state.adc_values = values;
+            state.current_alarms = bools;
             state.battery_level = battery;
             if tamper && !state.tamper_detected {
                 warn!("TAMPER DETECTED!");
             }
             state.tamper_detected = tamper;
+            state.power_connected = power;
         }
 
         Timer::after(Duration::from_millis(500)).await;
@@ -430,5 +446,53 @@ async fn system_monitor_task() {
         ))
         .await;
         CMD_CHANNEL.send(Command::UpdateTime).await;
+    }
+}
+
+pub async fn execute_mcu_command(cmd: &str) {
+    let mut reply = String::<128>::new();
+    use core::fmt::Write;
+
+    let state = STATE.lock().await;
+
+    match cmd.trim_end() {
+        "_alarms" => {
+            let a = state.current_alarms;
+            let _ = write!(
+                reply,
+                "\r\nAlarms: {}{}{}{}\r\n",
+                a[0] as u8, a[1] as u8, a[2] as u8, a[3] as u8
+            );
+        }
+        "_adc" => {
+            let v = state.adc_values;
+            let _ = write!(
+                reply,
+                "\r\nADC: {}, {}, {}, {}\r\n",
+                v[0], v[1], v[2], v[3]
+            );
+        }
+        "_battery" => {
+            let _ = write!(reply, "\r\nBattery: {} mV\r\n", state.battery_level);
+        }
+        "_power" => {
+            let p = if state.power_connected { "Connected" } else { "Disconnected" };
+            let _ = write!(reply, "\r\nPower: {}\r\n", p);
+        }
+        "_tamper" => {
+            let t = if state.tamper_detected { "Open" } else { "Closed" };
+            let _ = write!(reply, "\r\nTamper: {}\r\n", t);
+        }
+        _ => {
+            let _ = write!(reply, "\r\nUnknown MCU command: {}\r\n", cmd);
+        }
+    }
+
+    let bytes = reply.as_bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let space = core::cmp::min(bytes.len() - offset, 64);
+        let _ = USB_TX_PIPE.write(&bytes[offset..offset + space]).await;
+        offset += space;
     }
 }
