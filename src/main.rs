@@ -63,6 +63,9 @@ static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemSta
 
 static RTC: Mutex<CriticalSectionRawMutex, Option<RtcControl>> = Mutex::new(None);
 
+#[cfg(feature = "receiver")]
+static RELAY_STATES: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     // 1. Initialize new Hardware struct
@@ -377,7 +380,10 @@ async fn run_logic(mut leds: StatusLeds, #[cfg(feature = "receiver")] relays: &m
                 leds.set_action(PowerState::Off);
 
                 #[cfg(feature = "receiver")]
-                relays.set_all(PowerState::Off);
+                {
+                    relays.set_all(PowerState::Off);
+                    RELAY_STATES.store(0, core::sync::atomic::Ordering::Relaxed);
+                }
 
                 watchdog_deadline = None;
             }
@@ -400,6 +406,14 @@ async fn visualize_relays(relays: &mut AlarmRelays, leds: &mut StatusLeds, alarm
     visualize_common(alarm_str, |idx, state| {
         relays.set(idx, state); // Relays 0..3
         leds.set_by_index(idx + 1, state); // LEDs 1..4 (Optional, visual feedback)
+
+        let mut bits = RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed);
+        if state == PowerState::On {
+            bits |= 1 << idx;
+        } else {
+            bits &= !(1 << idx);
+        }
+        RELAY_STATES.store(bits, core::sync::atomic::Ordering::Relaxed);
     })
     .await;
 }
@@ -472,6 +486,18 @@ pub async fn execute_mcu_command(cmd: &str) {
                 reply,
                 "\r\nADC: {}, {}, {}, {}\r\n",
                 v[0], v[1], v[2], v[3]
+            );
+        }
+#[cfg(feature = "receiver")]
+        "_relays" => {
+            let bits = RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed);
+            let _ = write!(
+                reply,
+                "\r\nRelays: {}{}{}{}\r\n",
+                bits & 1,
+                (bits >> 1) & 1,
+                (bits >> 2) & 1,
+                (bits >> 3) & 1
             );
         }
         "_battery" => {
