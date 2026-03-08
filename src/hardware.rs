@@ -16,6 +16,8 @@ use embassy_usb::Config as UsbConfig;
 use embassy_usb::UsbDevice;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as CdcState};
 use defmt::info;
+use crate::constants::BATTERY_VOLTAGE_FACTOR;
+
 
 // --- Internal Interrupt Binding ---
 bind_interrupts!(struct Irqs {
@@ -130,7 +132,7 @@ impl SystemSensors {
     }
 
     pub async fn read_battery_voltage(&mut self) -> u16 {
-        self.adc.read(&mut self.battery_pin, SampleTime::CYCLES160_5).await
+        (self.adc.read(&mut self.battery_pin, SampleTime::CYCLES160_5).await as f32 * BATTERY_VOLTAGE_FACTOR) as u16
     }
 
     pub fn is_power_connected(&self) -> bool { self.power_good_pin.is_high() }

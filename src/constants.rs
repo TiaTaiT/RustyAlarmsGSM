@@ -30,6 +30,7 @@ pub const MAXIMUM_SIM800_LINE_COUNT: usize = 8;
 pub const MAXIMUM_INCOMING_SMS_BUFFER_SIZE: usize = 8;
 
 pub const SIM800_RX_BUFFER_SIZE: usize = 256;
+pub const BATTERY_VOLTAGE_FACTOR: f32 = 9.155;
 
 // STM32L0 config in hardware.rs is 8MHz
 pub const SYSCLK_HZ: u32 = 8_000_000;
