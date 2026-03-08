@@ -139,6 +139,28 @@ impl SystemSensors {
     pub fn is_housing_open   (&self) -> bool { self.tamper_pin.is_high()     }
 }
 
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use embassy_usb::Handler;
+
+pub static USB_DISCONNECT_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+pub struct DeviceHandler;
+
+impl DeviceHandler {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Handler for DeviceHandler {
+    fn suspended(&mut self, suspended: bool) {
+        if suspended {
+            USB_DISCONNECT_SIGNAL.signal(());
+        }
+    }
+}
+
 /// Static buffers consumed by `embassy-usb`. Must live for `'static`.
 /// Allocate once via `StaticCell<UsbResources>`.
 pub struct UsbResources {
@@ -149,6 +171,7 @@ pub struct UsbResources {
     // NOTE: embassy-usb 0.5.1 Builder::new takes 6 args — no separate
     // control_buf parameter; the msos_descriptor buffer doubles as control buf.
     pub cdc_state:         CdcState<'static>,
+    pub handler:           DeviceHandler,
 }
 
 impl UsbResources {
@@ -159,6 +182,7 @@ impl UsbResources {
             bos_descriptor:    [0u8; 256],
             msos_descriptor:   [0u8; 256],
             cdc_state:         CdcState::new(),
+            handler:           DeviceHandler::new(),
         }
     }
 }
@@ -203,6 +227,8 @@ pub fn build_usb(
         &mut res.bos_descriptor,
         &mut res.msos_descriptor,
     );
+
+    builder.handler(&mut res.handler);
 
     let serial = CdcAcmClass::new(&mut builder, &mut res.cdc_state, 64);
     let device  = builder.build();

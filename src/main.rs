@@ -111,7 +111,7 @@ async fn main(spawner: Spawner) {
 #[embassy_executor::task]
 async fn usb_task(driver: hardware::BoardUsbDriver) {
     let res = USB_STATE.init(hardware::UsbResources::new());
-    let (mut device, mut serial) = hardware::build_usb(driver, res);
+    let (mut device, serial) = hardware::build_usb(driver, res);
     embassy_futures::join::join(device.run(), async {
         let (mut sender, mut receiver) = serial.split();
         loop {
@@ -144,7 +144,8 @@ async fn usb_task(driver: hardware::BoardUsbDriver) {
                 }
             };
 
-            embassy_futures::join::join(rx_fut, tx_fut).await;
+            hardware::USB_DISCONNECT_SIGNAL.reset(); // ensure clean state
+            embassy_futures::select::select3(rx_fut, tx_fut, hardware::USB_DISCONNECT_SIGNAL.wait()).await;
             info!("USB disconnected");
         }
     })
