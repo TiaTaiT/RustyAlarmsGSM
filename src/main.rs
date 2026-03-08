@@ -456,6 +456,7 @@ pub async fn execute_mcu_command(cmd: &str) {
     let state = STATE.lock().await;
 
     match cmd.trim_end() {
+#[cfg(feature = "transmitter")]
         "_alarms" => {
             let a = state.current_alarms;
             let _ = write!(
@@ -464,6 +465,7 @@ pub async fn execute_mcu_command(cmd: &str) {
                 a[0] as u8, a[1] as u8, a[2] as u8, a[3] as u8
             );
         }
+#[cfg(feature = "transmitter")]
         "_adc" => {
             let v = state.adc_values;
             let _ = write!(
