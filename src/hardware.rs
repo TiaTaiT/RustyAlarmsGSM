@@ -1,5 +1,6 @@
 // /src/hardware.rs
 // Hardware Abstraction Layer
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_stm32::adc::{Adc, AnyAdcChannel, SampleTime};
 use embassy_stm32::adc::AdcChannel; // Required for .degrade_adc()
 use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
@@ -143,7 +144,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_usb::Handler;
 
-pub static USB_DISCONNECT_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+pub static USB_CONNECTED: AtomicBool = AtomicBool::new(false);
+pub static USB_STATE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub struct DeviceHandler;
 
@@ -154,9 +156,20 @@ impl DeviceHandler {
 }
 
 impl Handler for DeviceHandler {
+    fn reset(&mut self) {
+        USB_CONNECTED.store(false, Ordering::Relaxed);
+        USB_STATE_SIGNAL.signal(());
+    }
+
+    fn configured(&mut self, configured: bool) {
+        USB_CONNECTED.store(configured, Ordering::Relaxed);
+        USB_STATE_SIGNAL.signal(());
+    }
+
     fn suspended(&mut self, suspended: bool) {
         if suspended {
-            USB_DISCONNECT_SIGNAL.signal(());
+            USB_CONNECTED.store(false, Ordering::Relaxed);
+            USB_STATE_SIGNAL.signal(());
         }
     }
 }

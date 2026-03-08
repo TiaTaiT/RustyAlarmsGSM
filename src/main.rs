@@ -115,7 +115,32 @@ async fn usb_task(driver: hardware::BoardUsbDriver) {
     embassy_futures::join::join(device.run(), async {
         let (mut sender, mut receiver) = serial.split();
         loop {
-            sender.wait_connection().await;
+            // Wait for physical USB connection
+            while !hardware::USB_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
+                hardware::USB_STATE_SIGNAL.wait().await;
+            }
+
+            // Wait for terminal connection (DTR), but abort if physically disconnected
+            let wait_conn = sender.wait_connection();
+            let wait_disconn = async {
+                loop {
+                    hardware::USB_STATE_SIGNAL.wait().await;
+                    if !hardware::USB_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            };
+
+            match embassy_futures::select::select(wait_conn, wait_disconn).await {
+                embassy_futures::select::Either::Second(_) => continue,
+                _ => {}
+            }
+
+            // Double check to be absolutely sure
+            if !hardware::USB_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
+                continue;
+            }
+
             info!("USB connected");
 
             let rx_fut = async {
@@ -144,8 +169,19 @@ async fn usb_task(driver: hardware::BoardUsbDriver) {
                 }
             };
 
-            hardware::USB_DISCONNECT_SIGNAL.reset(); // ensure clean state
-            embassy_futures::select::select3(rx_fut, tx_fut, hardware::USB_DISCONNECT_SIGNAL.wait()).await;
+            let disconnect_fut = async {
+                if !hardware::USB_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                loop {
+                    hardware::USB_STATE_SIGNAL.wait().await;
+                    if !hardware::USB_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            };
+
+            embassy_futures::select::select3(rx_fut, tx_fut, disconnect_fut).await;
             info!("USB disconnected");
         }
     })
