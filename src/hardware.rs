@@ -281,7 +281,7 @@ pub fn init() -> Hardware {
     config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
 
     let p = embassy_stm32::init(config);
-    info!("Hardware initialized! Clocked at 8 MHz");
+    info!("Hardware initialized! Clocked at 4 MHz");
 
     // --- Outputs ---
     let _alarms_pullup = Output::new(p.PB1, Level::High, Speed::Low);

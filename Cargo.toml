@@ -2,7 +2,7 @@
 name = "embassy800c"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.93.0"
+rust-version = "1.94.1"
 
 [package.metadata.probe-rs]
 minimum-version = "0.30.0"
@@ -23,8 +23,8 @@ embassy-stm32 = { version = "0.5.0", features = ["stm32l072cb", "time-driver-any
 
 # Async time support
 embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-sync = { version = "0.7.2", features = ["defmt"] }
-embassy-usb = { version = "0.5.1", features = ["defmt"] }
+embassy-sync = { version = "0.8", features = ["defmt"] }
+embassy-usb = { version = "0.6", features = ["defmt"] }
 # Support crates for Cortex-M0 hardware
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
@@ -43,7 +43,7 @@ portable-atomic = { version = "1.13.1", features = ["critical-section"] }
 
 
 [features]
-default = ["receiver"]
+default = ["transmitter"]
 
 transmitter = []
 receiver = []

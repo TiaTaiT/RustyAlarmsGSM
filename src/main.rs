@@ -218,6 +218,10 @@ async fn monitor_task(mut sensors: SystemSensors) {
             (v, b)
         };
 
+        // remove after board testing, just to see values in logs
+        #[cfg(feature = "transmitter")]
+        info!("ADC Values: {}, {}, {}, {}", values[0], values[1], values[2], values[3]);
+
         #[cfg(not(feature = "transmitter"))]
         let (values, bools) = ([0u16; 4], [false; 4]);
 
