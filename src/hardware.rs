@@ -1,5 +1,7 @@
 // /src/hardware.rs
 // Hardware Abstraction Layer
+// This module encapsulates all hardware-specific details of the board.
+// Do not expose raw peripherals or pins outside this module. Instead, provide high-level methods on the public structs defined here.
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_stm32::adc::{Adc, AnyAdcChannel, SampleTime};
 use embassy_stm32::adc::AdcChannel; // Required for .degrade_adc()
