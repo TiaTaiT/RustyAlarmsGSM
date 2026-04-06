@@ -77,6 +77,9 @@ async fn main(spawner: Spawner) {
     let tx = hw.modem_tx;
     let rx = hw.modem_rx;
 
+    #[cfg(feature = "transmitter")]
+    let alarms_ctrl = hw.alarms_ctrl;
+    
     #[cfg(feature = "receiver")]
     let relays = hw.relays;
 
@@ -100,7 +103,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(logic_task(leds, relays)).unwrap();
 
     #[cfg(feature = "transmitter")]
-    spawner.spawn(logic_task(leds)).unwrap();
+    spawner.spawn(logic_task(leds, alarms_ctrl)).unwrap();
 
     spawner.spawn(system_monitor_task()).unwrap();
 
@@ -255,7 +258,8 @@ async fn monitor_task(mut sensors: SystemSensors) {
 
 #[cfg(feature = "transmitter")]
 #[embassy_executor::task]
-async fn logic_task(mut leds: StatusLeds) {
+async fn logic_task(leds: StatusLeds, mut alarms_ctrl: hardware::AlarmsControl) {
+    alarms_ctrl.set_pullup(PowerState::On);
     run_logic(leds).await;
 }
 

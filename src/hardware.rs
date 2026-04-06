@@ -142,6 +142,14 @@ impl SystemSensors {
     pub fn is_housing_open   (&self) -> bool { self.tamper_pin.is_high()     }
 }
 
+pub struct AlarmsControl {
+    alarms_pullup: Output<'static>,
+}
+
+impl AlarmsControl {
+    pub fn set_pullup(&mut self, state: PowerState) { apply_state(&mut self.alarms_pullup, state); }
+}
+
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_usb::Handler;
@@ -211,8 +219,8 @@ pub fn build_usb(
     res: &'static mut UsbResources,
 ) -> (UsbDevice<'static, BoardUsbDriver>, UsbSerial<'static>) {
     // -----------------------------------------------------------------------
-    // IMPORTANT — USB clock on STM32L052:
-    // The USB peripheral requires a 48 MHz source. On the L052 this comes from
+    // IMPORTANT — USB clock on STM32L072:
+    // The USB peripheral requires a 48 MHz source. On the L072 this comes from
     // the HSI48 oscillator (not the PLL). You must enable it in init():
     //
     //   use embassy_stm32::rcc::Hsi48Config;
@@ -258,6 +266,9 @@ pub struct Hardware {
     #[cfg(feature = "receiver")]
     pub relays:     AlarmRelays,
 
+    #[cfg(feature = "transmitter")]
+    pub alarms_ctrl: AlarmsControl,
+
     pub leds:       StatusLeds,
     pub modem_ctrl: ModemControl,
     pub modem_tx:   ModemTx,
@@ -277,7 +288,7 @@ pub fn init() -> Hardware {
     config.rcc.hse = Some(Hse { freq: Hertz::mhz(4), mode: HseMode::Oscillator });
     config.rcc.pll = Some(Pll { source: PllSource::HSE, div: PllDiv::DIV2, mul: PllMul::MUL4 });
     config.rcc.sys = Sysclk::PLL1_R;
-    // The STM32L052 has no hsi48 field on rcc::Config — HSI48 is enabled
+    // The STM32L072 has no hsi48 field on rcc::Config — HSI48 is enabled
     // implicitly by the embassy-stm32 RCC driver when you select it as the
     // USB clock source via the mux. This is the correct approach for L0 family.
     config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
@@ -286,7 +297,9 @@ pub fn init() -> Hardware {
     info!("Hardware initialized! Clocked at 4 MHz");
 
     // --- Outputs ---
-    let _alarms_pullup = Output::new(p.PB1, Level::High, Speed::Low);
+    let alarms_ctrl = AlarmsControl {
+        alarms_pullup: Output::new(p.PB1, Level::High, Speed::Low),
+    };
 
     let modem_ctrl = ModemControl {
         dc_power:  Output::new(p.PB4, Level::High, Speed::Low),
@@ -353,13 +366,15 @@ pub fn init() -> Hardware {
     };
 
     // --- USB Driver ---
-    // STM32L052 USB pins: PA11 = D- (DM), PA12 = D+ (DP)
+    // STM32L072 USB pins: PA11 = D- (DM), PA12 = D+ (DP)
     let usb_driver = UsbDriver::new(p.USB, Irqs, p.PA12, p.PA11);
 
     Hardware {
         sensors,
         #[cfg(feature = "receiver")]
         relays,
+        #[cfg(feature = "transmitter")]
+        alarms_ctrl,
         leds,
         modem_ctrl,
         modem_tx,
