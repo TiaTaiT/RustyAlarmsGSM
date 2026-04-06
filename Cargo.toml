@@ -15,7 +15,7 @@ bench = false
 
 [dependencies]
 # The core Embassy executor
-embassy-executor = { version = "0.9.1", features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-cortex-m", "defmt"] }
 
 # STM32 Hardware Abstraction Layer
 # Using 'time-driver-any' so embassy-time works automatically

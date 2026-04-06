@@ -95,20 +95,20 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_millis(200)).await;
     leds.set_system(PowerState::Off);
 
-    spawner.spawn(sim800_task(tx, rx, sim_control)).unwrap();
-    spawner.spawn(monitor_task(sensors)).unwrap();
+    spawner.spawn(sim800_task(tx, rx, sim_control).unwrap());
+    spawner.spawn(monitor_task(sensors).unwrap());
 
     // Pass relays to logic task if receiver
     #[cfg(feature = "receiver")]
-    spawner.spawn(logic_task(leds, relays)).unwrap();
+    spawner.spawn(logic_task(leds, relays).unwrap());
 
     #[cfg(feature = "transmitter")]
-    spawner.spawn(logic_task(leds, alarms_ctrl)).unwrap();
+    spawner.spawn(logic_task(leds, alarms_ctrl).unwrap());
 
-    spawner.spawn(system_monitor_task()).unwrap();
+    spawner.spawn(system_monitor_task().unwrap());
 
     let driver = hw.usb_driver.take().unwrap();
-    spawner.spawn(usb_task(driver)).unwrap();
+    spawner.spawn(usb_task(driver).unwrap());
 }
 
 #[embassy_executor::task]
