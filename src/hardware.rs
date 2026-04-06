@@ -11,7 +11,7 @@ use embassy_stm32::rcc::mux;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::usart::{Config as UartConfig, Uart, UartRx, UartTx};
 use embassy_stm32::usb::Driver as UsbDriver;
-use embassy_stm32::{Config, adc, bind_interrupts, usart, usb};
+use embassy_stm32::{Config, adc, bind_interrupts, dma, usart, usb};
 use embassy_usb::Builder as UsbBuilder;
 use embassy_usb::Config as UsbConfig;
 use embassy_usb::UsbDevice;
@@ -25,6 +25,8 @@ bind_interrupts!(struct Irqs {
     ADC1_COMP => adc::InterruptHandler<ADC1>;
     USART1    => usart::InterruptHandler<embassy_stm32::peripherals::USART1>;
     USART2    => usart::InterruptHandler<embassy_stm32::peripherals::USART2>;
+    DMA1_CHANNEL2_3 => dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH2>, dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH3>;
+	DMA1_CHANNEL4_5_6_7 => dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH4>, dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH5>;
     USB       => usb::InterruptHandler<USB>;
 });
 
@@ -303,18 +305,18 @@ pub fn init() -> Hardware {
     let mut config_u1 = UartConfig::default();
     config_u1.baudrate = 115200;
     let _debug_uart = Uart::new(
-        p.USART1, p.PA10, p.PA9,
-        Irqs,
+        p.USART1, p.PA10, p.PA9, 
         p.DMA1_CH2, p.DMA1_CH3,
+        Irqs,
         config_u1,
     ).unwrap();
 
     let mut config_u2 = UartConfig::default();
     config_u2.baudrate = 9600;
     let (modem_tx, modem_rx) = Uart::new(
-        p.USART2, p.PA3, p.PA2,
-        Irqs,
-        p.DMA1_CH4, p.DMA1_CH5,
+        p.USART2, p.PA3, p.PA2, 
+        p.DMA1_CH4, p.DMA1_CH5, 
+        Irqs, 
         config_u2,
     ).unwrap().split();
 
