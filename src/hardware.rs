@@ -116,7 +116,7 @@ impl AlarmRelays {
 // --- Component: System Sensors ---
 pub struct SystemSensors {
     #[cfg(feature = "transmitter")]
-    alarms: [AnyAdcChannel<'static, ADC1>; 4],
+    alarms: [AnyAdcChannel<'static, ADC1>; 3],
 
     adc:            Adc<'static, ADC1>,
     battery_pin:    AnyAdcChannel<'static, ADC1>,
@@ -126,12 +126,11 @@ pub struct SystemSensors {
 
 impl SystemSensors {
     #[cfg(feature = "transmitter")]
-    pub async fn read_alarms(&mut self) -> [u16; 4] {
+    pub async fn read_alarms(&mut self) -> [u16; 3] {
         let v0 = self.adc.read(&mut self.alarms[0], SampleTime::CYCLES160_5).await;
         let v1 = self.adc.read(&mut self.alarms[1], SampleTime::CYCLES160_5).await;
         let v2 = self.adc.read(&mut self.alarms[2], SampleTime::CYCLES160_5).await;
-        let v3 = self.adc.read(&mut self.alarms[3], SampleTime::CYCLES160_5).await;
-        [v0, v1, v2, v3]
+        [v0, v1, v2]
     }
 
     pub async fn read_battery_voltage(&mut self) -> u16 {
@@ -191,8 +190,6 @@ pub struct UsbResources {
     pub config_descriptor: [u8; 256],
     pub bos_descriptor:    [u8; 256],
     pub msos_descriptor:   [u8; 256],
-    // NOTE: embassy-usb 0.5.1 Builder::new takes 6 args — no separate
-    // control_buf parameter; the msos_descriptor buffer doubles as control buf.
     pub cdc_state:         CdcState<'static>,
     pub handler:           DeviceHandler,
 }
@@ -345,7 +342,6 @@ pub fn init() -> Hardware {
             p.PA4.degrade_adc(),
             p.PA5.degrade_adc(),
             p.PA6.degrade_adc(),
-            p.PA7.degrade_adc(),
         ],
         adc, battery_pin, power_good_pin, tamper_pin,
     };

@@ -46,7 +46,7 @@ struct SystemState {
     alive_countdown: i32,
     battery_level: u16,
     tamper_detected: bool,
-    adc_values: [u16; 4],
+    adc_values: [u16; 3],
     current_alarms: [bool; 4],
     power_connected: bool,
 }
@@ -56,7 +56,7 @@ static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemSta
     alive_countdown: 0,
     battery_level: 0,
     tamper_detected: false,
-    adc_values: [0; 4],
+    adc_values: [0; 3],
     current_alarms: [false; 4],
     power_connected: false,
 });
@@ -212,21 +212,22 @@ async fn monitor_task(mut sensors: SystemSensors) {
         #[cfg(feature = "transmitter")]
         let (values, bools) = {
             let v = sensors.read_alarms().await;
+            let tamper_state = !sensors.is_housing_open();
             let b = [
                 v[0] > LOW_INTRUSION_THRESHOLD && v[0] < HIGH_INTRUSION_THRESHOLD,
                 v[1] > LOW_INTRUSION_THRESHOLD && v[1] < HIGH_INTRUSION_THRESHOLD,
                 v[2] > LOW_INTRUSION_THRESHOLD && v[2] < HIGH_INTRUSION_THRESHOLD,
-                v[3] > LOW_INTRUSION_THRESHOLD && v[3] < HIGH_INTRUSION_THRESHOLD,
+                tamper_state,
             ];
             (v, b)
         };
 
         // remove after board testing, just to see values in logs
         #[cfg(feature = "transmitter")]
-        info!("ADC Values: {}, {}, {}, {}", values[0], values[1], values[2], values[3]);
+        info!("ADC Values: {}, {}, {}, {}", bools[0], bools[1], bools[2], bools[3]);
 
         #[cfg(not(feature = "transmitter"))]
-        let (values, bools) = ([0u16; 4], [false; 4]);
+        let (values, bools) = ([0u16; 3], [false; 4]);
 
         // Transmitter: Read Alarms
         #[cfg(feature = "transmitter")]
