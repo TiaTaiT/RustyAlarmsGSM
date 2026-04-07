@@ -364,56 +364,68 @@ impl Sim800Driver {
         self.send_str(number).await;
         self.send_str(";\r\n").await;
 
-        if self.send_cmd_wait_ok("", 20000).await.is_err() {}
-
-        info!("step 1");
         let result = with_timeout(Duration::from_secs(20), async {
             loop {
                 let line = self.read_line().await?;
+                info!("Call setup line: {}", line);
                 if line.contains(ONLINE_SIGNAL) {
-                    return Ok(true);
+                    return Ok::<(), ()>(());
                 }
                 if line.contains("NO CARRIER") || line.contains("BUSY") {
                     return Err(());
                 }
-                if line.contains("+DTMF: *") {
-                    return Ok(true);
+                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
+                    let c = val.trim().chars().next().unwrap_or('\0');
+                    if c == ONLINE_SIGNAL.chars().next().unwrap_or('\0') {
+                        return Ok::<(), ()>(());
+                    }
                 }
             }
         })
         .await;
 
-        info!("step 2");
         if result.is_err() {
             self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
             return Err(());
         }
 
-        info!("step 3");
         let mut out_buf = [0u8; 64];
         if let Some(csv) = separate_chars_by_commas(dtmf, &mut out_buf) {
             let mut cmd = String::<64>::new();
             use core::fmt::Write;
             let _ = write!(cmd, "AT+VTS=\"{}\"", csv);
             self.send_cmd_wait_ok(&cmd, 5000).await?;
+        } else {
+            self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+            return Err(());
         }
 
-        info!("step 4");
-        let confirm_res = with_timeout(Duration::from_secs(5), async {
+        let confirm_res = with_timeout(Duration::from_secs(10), async {
             loop {
                 let line = self.read_line().await?;
                 info!("Received during confirmation wait: {}", line);
-                if line.contains("+DTMF: #") {
+                if line.contains("NO CARRIER") || line.contains("BUSY") {
+                    return Err(());
+                }
+                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
+                    let c = val.trim().chars().next().unwrap_or('\0');
+                    if c == CONFIRMATION_SIGNAL.chars().next().unwrap_or('\0') {
+                        self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+                        return Ok::<(), ()>(());
+                    }
+                }
+                if line.contains(CONFIRMATION_SIGNAL) {
+                    self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
                     return Ok::<(), ()>(());
                 }
             }
         })
         .await;
 
-        info!("step 5 {}", confirm_res.is_ok());
-        self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+        if confirm_res.is_err() {
+            self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+        }
 
-        info!("step 6 {}", confirm_res.is_ok());
         match confirm_res {
             Ok(_) => Ok(()),
             Err(_) => Err(()),
@@ -434,9 +446,10 @@ impl Sim800Driver {
 
         let mut dtmf_buf = String::<DTMF_PACKET_LENGTH>::new();
 
-        let _ = with_timeout(Duration::from_secs(10), async {
+        let receive_res = with_timeout(Duration::from_secs(10), async {
             loop {
                 let line = self.read_line().await?;
+                info!("Incoming call flow line: {}", line);
                 if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
                     let c = val.trim().chars().next().unwrap_or('\0');
                     if c != '\0' {
@@ -454,10 +467,13 @@ impl Sim800Driver {
         })
         .await;
 
-        let _ = write!(cmd, "AT+VTS=\"{}\"", CONFIRMATION_SIGNAL);
-        self.send_cmd_wait_ok(&cmd, 2000).await.ok();
+        if receive_res.is_ok() {
+            cmd.clear();
+            let _ = write!(cmd, "AT+VTS=\"{}\"", CONFIRMATION_SIGNAL);
+            self.send_cmd_wait_ok(&cmd, 2000).await.ok();
+            Timer::after(Duration::from_secs(1)).await;
+        }
 
-        Timer::after(Duration::from_secs(1)).await;
         self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
 
         event_channel.send(SimEvent::CallEnded).await;
