@@ -364,8 +364,9 @@ impl Sim800Driver {
         self.send_str(number).await;
         self.send_str(";\r\n").await;
 
-        if self.send_cmd_wait_ok("", 5000).await.is_err() {}
+        if self.send_cmd_wait_ok("", 20000).await.is_err() {}
 
+        info!("step 1");
         let result = with_timeout(Duration::from_secs(20), async {
             loop {
                 let line = self.read_line().await?;
@@ -382,11 +383,13 @@ impl Sim800Driver {
         })
         .await;
 
+        info!("step 2");
         if result.is_err() {
             self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
             return Err(());
         }
 
+        info!("step 3");
         let mut out_buf = [0u8; 64];
         if let Some(csv) = separate_chars_by_commas(dtmf, &mut out_buf) {
             let mut cmd = String::<64>::new();
@@ -395,9 +398,11 @@ impl Sim800Driver {
             self.send_cmd_wait_ok(&cmd, 5000).await?;
         }
 
+        info!("step 4");
         let confirm_res = with_timeout(Duration::from_secs(5), async {
             loop {
                 let line = self.read_line().await?;
+                info!("Received during confirmation wait: {}", line);
                 if line.contains("+DTMF: #") {
                     return Ok::<(), ()>(());
                 }
@@ -405,8 +410,10 @@ impl Sim800Driver {
         })
         .await;
 
+        info!("step 5 {}", confirm_res.is_ok());
         self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
 
+        info!("step 6 {}", confirm_res.is_ok());
         match confirm_res {
             Ok(_) => Ok(()),
             Err(_) => Err(()),

@@ -1,5 +1,5 @@
 // /src/constants.rs
-pub const USE_SMS: bool = true;
+pub const USE_SMS: bool = false;
 
 // ADC is 12-bit (0-4095). Adjust thresholds if voltage dividers changed.
 pub const LOW_INTRUSION_THRESHOLD: u16 = 1000;
