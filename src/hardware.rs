@@ -141,14 +141,17 @@ impl SystemSensors {
 
     pub fn is_power_connected(&self) -> bool { self.power_good_pin.is_high() }
     pub fn is_housing_open   (&self) -> bool { self.tamper_pin.is_high()     }
+    
 }
 
 pub struct AlarmsControl {
     alarms_pullup: Output<'static>,
+    is_sms_option:  Input<'static>,
 }
 
 impl AlarmsControl {
     pub fn set_pullup(&mut self, state: PowerState) { apply_state(&mut self.alarms_pullup, state); }
+    pub fn is_sms_enabled   (&self) -> bool { self.is_sms_option.is_high() }
 }
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -298,6 +301,7 @@ pub fn init() -> Hardware {
     // --- Outputs ---
     let alarms_ctrl = AlarmsControl {
         alarms_pullup: Output::new(p.PB1, Level::High, Speed::Low),
+        is_sms_option: Input::new(p.PB10, Pull::None),
     };
 
     let modem_ctrl = ModemControl {
@@ -337,6 +341,7 @@ pub fn init() -> Hardware {
     let battery_pin    = p.PB0.degrade_adc();
     let power_good_pin = Input::new(p.PB11, Pull::None);
     let tamper_pin     = Input::new(p.PB5,  Pull::None);
+    
 
     #[cfg(feature = "transmitter")]
     let sensors = SystemSensors {
@@ -345,7 +350,10 @@ pub fn init() -> Hardware {
             p.PA5.degrade_adc(),
             p.PA6.degrade_adc(),
         ],
-        adc, battery_pin, power_good_pin, tamper_pin,
+        adc,
+        battery_pin,
+        power_good_pin,
+        tamper_pin,
     };
 
     #[cfg(feature = "receiver")]

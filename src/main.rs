@@ -261,7 +261,8 @@ async fn monitor_task(mut sensors: SystemSensors) {
 #[embassy_executor::task]
 async fn logic_task(leds: StatusLeds, mut alarms_ctrl: hardware::AlarmsControl) {
     alarms_ctrl.set_pullup(PowerState::On);
-    run_logic(leds).await;
+    let use_sms = alarms_ctrl.is_sms_enabled();
+    run_logic(leds, use_sms).await;
 }
 
 #[cfg(feature = "receiver")]
@@ -270,7 +271,13 @@ async fn logic_task(leds: StatusLeds, mut relays: AlarmRelays) {
     run_logic(leds, &mut relays).await;
 }
 
-async fn run_logic(mut leds: StatusLeds, #[cfg(feature = "receiver")] relays: &mut AlarmRelays) {
+async fn run_logic(
+    mut leds: StatusLeds,
+    #[cfg(feature = "receiver")]
+    relays: &mut AlarmRelays,
+    #[cfg(feature = "transmitter")]
+    use_sms: bool
+) {
     let mut watchdog_deadline: Option<Instant> = None;
     let mut dtmf_buffer = String::<DTMF_PACKET_LENGTH>::new();
     let mut next_sender_tick = Instant::now() + Duration::from_secs(60);
@@ -364,7 +371,7 @@ async fn run_logic(mut leds: StatusLeds, #[cfg(feature = "receiver")] relays: &m
                             let str_stack: String<DTMF_PACKET_LENGTH> = bits.iter().collect();
                             state.alive_countdown = ALIVE_PERIOD_MINUTES + 1;
 
-                            if USE_SMS {
+                            if use_sms {
                                 let time_buf = {
                                     let rtc = RTC.lock().await;
                                     if let Some(ref rtc_ctrl) = *rtc {

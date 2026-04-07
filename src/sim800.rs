@@ -474,7 +474,7 @@ impl Sim800Driver {
             Timer::after(Duration::from_secs(1)).await;
         }
 
-        self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+        //self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
 
         event_channel.send(SimEvent::CallEnded).await;
     }
