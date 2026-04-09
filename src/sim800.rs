@@ -66,6 +66,7 @@ pub struct Sim800Driver {
     last_alarm_time: u64,
     usb_cmd_mode: bool,
     usb_cmd_buf: String<64>,
+    slow_clock_mode: bool,
 }
 
 impl Sim800Driver {
@@ -80,7 +81,19 @@ impl Sim800Driver {
             last_alarm_time: 0,
             usb_cmd_mode: false,
             usb_cmd_buf: String::new(),
+            slow_clock_mode: false,
         }
+    }
+
+    async fn wake_if_sleeping(&mut self) {
+        if !self.slow_clock_mode {
+            return;
+        }
+
+        // CSCLK=2 requires at least one wake character, then >=100 ms delay
+        // before sending the actual AT command to avoid garbled UART data.
+        self.send_str(" ").await;
+        Timer::after(Duration::from_millis(100)).await;
     }
 
     async fn read_line(&mut self) -> Result<&str, ()> {
@@ -130,6 +143,7 @@ impl Sim800Driver {
     }
 
     async fn send_cmd_wait_ok(&mut self, cmd: &str, timeout_ms: u64) -> Result<(), ()> {
+        self.wake_if_sleeping().await;
         self.send_str(cmd).await;
         self.send_str("\r\n").await;
 
@@ -167,6 +181,7 @@ impl Sim800Driver {
 
     // Specialized handler for UpdateTime to ensure +CCLK is parsed
     async fn execute_update_time(&mut self) -> Option<GsmTime> {
+        self.wake_if_sleeping().await;
         self.send_str("AT+CCLK?").await;
         self.send_str("\r\n").await;
 
@@ -194,6 +209,7 @@ impl Sim800Driver {
 
     // Helper to check CLTS status
     async fn check_clts_enabled(&mut self) -> Result<bool, ()> {
+        self.wake_if_sleeping().await;
         self.send_str("AT+CLTS?").await;
         self.send_str("\r\n").await;
 
@@ -302,6 +318,7 @@ impl Sim800Driver {
             "AT+CSMP=49,167,0,0", // SMS Text Mode Parameters
             "AT+CREG=1",          // Network Registration Report
             "AT+DDET=1",          // DTMF Detection
+            "AT+CSCLK=2",         // Automatic slow clock mode
         ];
 
         for cmd in cmds {
@@ -319,6 +336,8 @@ impl Sim800Driver {
             }
         }
 
+        self.slow_clock_mode = true;
+
         // 5. Load Phonebook
         info!("Loading Phonebook...");
         for i in 1..=8 {
@@ -332,6 +351,7 @@ impl Sim800Driver {
     }
 
     pub async fn send_sms(&mut self, number: &str, message: &str) -> Result<(), ()> {
+        self.wake_if_sleeping().await;
         self.send_str("AT+CMGS=\"").await;
         self.send_str(number).await;
         self.send_str("\"\r\n").await;
@@ -360,6 +380,7 @@ impl Sim800Driver {
     }
 
     pub async fn make_call_dtmf(&mut self, number: &str, dtmf: &str) -> Result<(), ()> {
+        self.wake_if_sleeping().await;
         self.send_str("ATD").await;
         self.send_str(number).await;
         self.send_str(";\r\n").await;
