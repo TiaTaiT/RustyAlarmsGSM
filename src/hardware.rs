@@ -287,9 +287,17 @@ pub struct Hardware {
 // --- Initialization ---
 pub fn init() -> Hardware {
     let mut config = Config::default();
-    config.rcc.hse = Some(Hse { freq: Hertz::mhz(4), mode: HseMode::Oscillator });
-    config.rcc.pll = Some(Pll { source: PllSource::HSE, div: PllDiv::DIV2, mul: PllMul::MUL4 });
-    config.rcc.sys = Sysclk::PLL1_R;
+
+    config.rcc.hse = Some(Hse {
+        freq: Hertz::mhz(4),
+        mode: HseMode::Oscillator,
+    });
+
+    // Disable PLL for low powering
+    config.rcc.pll = None;
+    // Use HSE directly
+    config.rcc.sys = Sysclk::HSE;
+
     // The STM32L072 has no hsi48 field on rcc::Config — HSI48 is enabled
     // implicitly by the embassy-stm32 RCC driver when you select it as the
     // USB clock source via the mux. This is the correct approach for L0 family.
