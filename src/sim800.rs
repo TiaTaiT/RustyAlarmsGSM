@@ -66,6 +66,7 @@ pub struct Sim800Driver {
     last_alarm_time: u64,
     usb_cmd_mode: bool,
     usb_cmd_buf: String<64>,
+    is_powered: bool,
 }
 
 impl Sim800Driver {
@@ -80,6 +81,7 @@ impl Sim800Driver {
             last_alarm_time: 0,
             usb_cmd_mode: false,
             usb_cmd_buf: String::new(),
+            is_powered: false,
         }
     }
 
@@ -167,6 +169,7 @@ impl Sim800Driver {
 
     // Specialized handler for UpdateTime to ensure +CCLK is parsed
     async fn execute_update_time(&mut self) -> Option<GsmTime> {
+        self.ensure_powered().await;
         self.send_str("AT+CCLK?").await;
         self.send_str("\r\n").await;
 
@@ -235,6 +238,10 @@ impl Sim800Driver {
     // -----------------------------------------------------------------------
 
     pub async fn power_on(&mut self) {
+        if self.is_powered {
+            return;
+        }
+
         info!("Starting SIM800 Power Sequence...");
 
         // 1. Hardware Power On
@@ -328,10 +335,32 @@ impl Sim800Driver {
             let _ = self.send_cmd_wait_ok(&buf, 2000).await;
         }
 
+        self.is_powered = true;
         info!("SIM800 Initialized and Ready");
     }
 
+    pub async fn power_off(&mut self) {
+        if !self.is_powered {
+            self.control.set_power_key(PowerState::Off);
+            self.control.set_dc_power(PowerState::Off);
+            return;
+        }
+
+        info!("Disabling SIM800 power supply...");
+        self.control.set_power_key(PowerState::Off);
+        Timer::after(Duration::from_millis(100)).await;
+        self.control.set_dc_power(PowerState::Off);
+        self.is_powered = false;
+    }
+
+    async fn ensure_powered(&mut self) {
+        if !self.is_powered {
+            self.power_on().await;
+        }
+    }
+
     pub async fn send_sms(&mut self, number: &str, message: &str) -> Result<(), ()> {
+        self.ensure_powered().await;
         self.send_str("AT+CMGS=\"").await;
         self.send_str(number).await;
         self.send_str("\"\r\n").await;
@@ -360,6 +389,7 @@ impl Sim800Driver {
     }
 
     pub async fn make_call_dtmf(&mut self, number: &str, dtmf: &str) -> Result<(), ()> {
+        self.ensure_powered().await;
         self.send_str("ATD").await;
         self.send_str(number).await;
         self.send_str(";\r\n").await;
@@ -436,6 +466,7 @@ impl Sim800Driver {
         &mut self,
         event_channel: &Sender<'static, CriticalSectionRawMutex, SimEvent, 4>,
     ) {
+        self.ensure_powered().await;
         self.send_cmd_wait_ok("ATA", 2000).await.ok();
         Timer::after(Duration::from_secs(1)).await;
 
@@ -511,20 +542,22 @@ impl Sim800Driver {
         cmd_channel: Receiver<'static, CriticalSectionRawMutex, Command, 4>,
         event_channel: Sender<'static, CriticalSectionRawMutex, SimEvent, 4>,
     ) {
-        self.power_on().await;
-
         let mut uptime_sec: u64 = 0;
 
         loop {
             use embassy_futures::select::{Either3, select3};
 
             let mut usb_rx_buf = [0u8; 64];
-            let selection = select3(
-                self.read_line(),
-                cmd_channel.receive(),
-                USB_RX_PIPE.read(&mut usb_rx_buf),
-            )
-            .await;
+            let selection = if self.is_powered {
+                select3(
+                    self.read_line(),
+                    cmd_channel.receive(),
+                    USB_RX_PIPE.read(&mut usb_rx_buf),
+                )
+                .await
+            } else {
+                Either3::Second(cmd_channel.receive().await)
+            };
 
             uptime_sec += 1;
 
@@ -595,6 +628,7 @@ impl Sim800Driver {
                             message,
                         } => {
                             let _ = self.send_sms(&phone_number, &message).await;
+                            self.power_off().await;
                         }
                         Command::SendAlarmSms { message } => {
                             let mut target_num = String::<MAX_PHONE_LENGTH>::new();
@@ -606,6 +640,7 @@ impl Sim800Driver {
                             if found {
                                 let _ = self.send_sms(&target_num, &message).await;
                             }
+                            self.power_off().await;
                         }
                         Command::CallAlarmWithDtmf { dtmf } => {
                             let mut target_num = String::<MAX_PHONE_LENGTH>::new();
@@ -626,6 +661,7 @@ impl Sim800Driver {
                                         uptime_sec - self.last_alarm_time
                                     );
                                     event_channel.send(SimEvent::CallExecuted(true)).await;
+                                    self.power_off().await;
                                 } else {
                                     info!("Calling Alarm: {} with DTMF: {}", target_num, dtmf);
                                     match self.make_call_dtmf(&target_num, &dtmf).await {
@@ -640,6 +676,7 @@ impl Sim800Driver {
                                             event_channel.send(SimEvent::CallExecuted(false)).await;
                                         }
                                     }
+                                    self.power_off().await;
                                 }
                             } else {
                                 warn!("No phone number for alarm call!");
@@ -648,9 +685,11 @@ impl Sim800Driver {
                         }
                         Command::CallWithDtmf { phone_number, dtmf } => {
                             let _ = self.make_call_dtmf(&phone_number, &dtmf).await;
+                            self.power_off().await;
                         }
                         Command::HandleIncomingCall { .. } => {
                             self.handle_incoming_call_flow(&event_channel).await;
+                            self.power_off().await;
                         }
                         Command::UpdateTime => {
                             if let Some(time) = self.execute_update_time().await {
@@ -667,6 +706,7 @@ impl Sim800Driver {
                             } else {
                                 warn!("Failed to parse time from +CCLK");
                             }
+                            self.power_off().await;
                         }
                     }
                 }
