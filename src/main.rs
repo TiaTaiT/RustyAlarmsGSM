@@ -537,8 +537,8 @@ pub async fn execute_mcu_command(cmd: &str) {
             let v = state.adc_values;
             let _ = write!(
                 reply,
-                "\r\nADC: {}, {}, {}, {}\r\n",
-                v[0], v[1], v[2], v[3]
+                "\r\nADC: {}, {}, {}\r\n",
+                v[0], v[1], v[2]
             );
         }
 #[cfg(feature = "receiver")]

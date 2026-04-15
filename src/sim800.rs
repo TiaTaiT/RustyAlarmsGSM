@@ -264,7 +264,7 @@ impl Sim800Driver {
             }
             attempts += 1;
             if attempts > 5 {
-                error!("AT Handshake failed");
+                error!("AT Handshake failed after {} attempts", attempts);
                 break;
             }
             Timer::after(Duration::from_millis(500)).await;
@@ -548,15 +548,11 @@ impl Sim800Driver {
             use embassy_futures::select::{Either3, select3};
 
             let mut usb_rx_buf = [0u8; 64];
+            let usb_fut = USB_RX_PIPE.read(&mut usb_rx_buf);
             let selection = if self.is_powered {
-                select3(
-                    self.read_line(),
-                    cmd_channel.receive(),
-                    USB_RX_PIPE.read(&mut usb_rx_buf),
-                )
-                .await
+                select3(self.read_line(), cmd_channel.receive(), usb_fut).await
             } else {
-                Either3::Second(cmd_channel.receive().await)
+                select3(core::future::pending(), cmd_channel.receive(), usb_fut).await
             };
 
             uptime_sec += 1;
@@ -735,8 +731,11 @@ impl Sim800Driver {
                                     self.usb_cmd_buf.push(c).ok();
                                 }
                             } else {
-                                // Forward MAUI command to modem
-                                let _ = self.tx.write(&[b]).await;
+                                // Forward MAUI command to modem only when the modem is active.
+                                // USB itself must remain responsive even while the SIM800C is off.
+                                if self.is_powered {
+                                    let _ = self.tx.write(&[b]).await;
+                                }
                                 // Echo it to the TX pipe so MAUI sees what it sent
                                 let _ = USB_TX_PIPE.try_write(&[b]);
                             }
