@@ -145,6 +145,7 @@ async fn usb_task(driver: hardware::BoardUsbDriver) {
             }
 
             info!("USB connected");
+            CMD_CHANNEL.send(Command::UsbConnected).await;
 
             let rx_fut = async {
                 let mut buf = [0u8; 64];
@@ -185,6 +186,7 @@ async fn usb_task(driver: hardware::BoardUsbDriver) {
             };
 
             embassy_futures::select::select3(rx_fut, tx_fut, disconnect_fut).await;
+            CMD_CHANNEL.send(Command::UsbDisconnected).await;
             info!("USB disconnected");
         }
     })

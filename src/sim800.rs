@@ -20,6 +20,8 @@ use embassy_sync::channel::{Receiver, Sender};
 #[derive(Clone, defmt::Format, PartialEq)]
 pub enum Command {
     Init,
+    UsbConnected,
+    UsbDisconnected,
     SendMessage {
         phone_number: String<MAX_PHONE_LENGTH>,
         message: String<SIM800_LINE_BUFFER_SIZE>,
@@ -66,6 +68,7 @@ pub struct Sim800Driver {
     last_alarm_time: u64,
     usb_cmd_mode: bool,
     usb_cmd_buf: String<64>,
+    usb_connected: bool,
     is_powered: bool,
 }
 
@@ -81,6 +84,7 @@ impl Sim800Driver {
             last_alarm_time: 0,
             usb_cmd_mode: false,
             usb_cmd_buf: String::new(),
+            usb_connected: false,
             is_powered: false,
         }
     }
@@ -359,6 +363,14 @@ impl Sim800Driver {
         }
     }
 
+    async fn restore_usb_modem_mode_if_needed(&mut self) {
+        if self.usb_connected {
+            self.power_on().await;
+        } else {
+            self.power_off().await;
+        }
+    }
+
     pub async fn send_sms(&mut self, number: &str, message: &str) -> Result<(), ()> {
         self.ensure_powered().await;
         self.send_str("AT+CMGS=\"").await;
@@ -619,12 +631,22 @@ impl Sim800Driver {
                     info!("Processing command: {:?}", cmd);
                     match cmd {
                         Command::Init => self.power_on().await,
+                        Command::UsbConnected => {
+                            self.usb_connected = true;
+                            self.power_on().await;
+                        }
+                        Command::UsbDisconnected => {
+                            self.usb_connected = false;
+                            self.usb_cmd_mode = false;
+                            self.usb_cmd_buf.clear();
+                            self.power_off().await;
+                        }
                         Command::SendMessage {
                             phone_number,
                             message,
                         } => {
                             let _ = self.send_sms(&phone_number, &message).await;
-                            self.power_off().await;
+                            self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::SendAlarmSms { message } => {
                             let mut target_num = String::<MAX_PHONE_LENGTH>::new();
@@ -636,7 +658,7 @@ impl Sim800Driver {
                             if found {
                                 let _ = self.send_sms(&target_num, &message).await;
                             }
-                            self.power_off().await;
+                            self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::CallAlarmWithDtmf { dtmf } => {
                             let mut target_num = String::<MAX_PHONE_LENGTH>::new();
@@ -657,7 +679,7 @@ impl Sim800Driver {
                                         uptime_sec - self.last_alarm_time
                                     );
                                     event_channel.send(SimEvent::CallExecuted(true)).await;
-                                    self.power_off().await;
+                                    self.restore_usb_modem_mode_if_needed().await;
                                 } else {
                                     info!("Calling Alarm: {} with DTMF: {}", target_num, dtmf);
                                     match self.make_call_dtmf(&target_num, &dtmf).await {
@@ -672,7 +694,7 @@ impl Sim800Driver {
                                             event_channel.send(SimEvent::CallExecuted(false)).await;
                                         }
                                     }
-                                    self.power_off().await;
+                                    self.restore_usb_modem_mode_if_needed().await;
                                 }
                             } else {
                                 warn!("No phone number for alarm call!");
@@ -681,11 +703,11 @@ impl Sim800Driver {
                         }
                         Command::CallWithDtmf { phone_number, dtmf } => {
                             let _ = self.make_call_dtmf(&phone_number, &dtmf).await;
-                            self.power_off().await;
+                            self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::HandleIncomingCall { .. } => {
                             self.handle_incoming_call_flow(&event_channel).await;
-                            self.power_off().await;
+                            self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::UpdateTime => {
                             if let Some(time) = self.execute_update_time().await {
@@ -702,7 +724,7 @@ impl Sim800Driver {
                             } else {
                                 warn!("Failed to parse time from +CCLK");
                             }
-                            self.power_off().await;
+                            self.restore_usb_modem_mode_if_needed().await;
                         }
                     }
                 }
