@@ -19,7 +19,7 @@ use embassy_usb::Config as UsbConfig;
 use embassy_usb::UsbDevice;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as CdcState};
 use defmt::info;
-use crate::constants::BATTERY_VOLTAGE_FACTOR;
+use crate::constants::{BATTERY_VOLTAGE_FACTOR, SYSCLK_MHZ};
 
 
 // --- Internal Interrupt Binding ---
@@ -287,7 +287,7 @@ pub struct Hardware {
 // --- Initialization ---
 pub fn init() -> Hardware {
     let mut config = Config::default();
-    config.rcc.hse = Some(Hse { freq: Hertz::mhz(4), mode: HseMode::Oscillator });
+    config.rcc.hse = Some(Hse { freq: Hertz::mhz(SYSCLK_MHZ), mode: HseMode::Oscillator });
     config.rcc.pll = Some(Pll { source: PllSource::HSE, div: PllDiv::DIV2, mul: PllMul::MUL4 });
     config.rcc.sys = Sysclk::PLL1_R;
     // The STM32L072 has no hsi48 field on rcc::Config — HSI48 is enabled
@@ -296,7 +296,7 @@ pub fn init() -> Hardware {
     config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
 
     let p = embassy_stm32::init(config);
-    info!("Hardware initialized! Clocked at 4 MHz");
+    info!("Hardware initialized! Clocked at {} MHz", SYSCLK_MHZ);
 
     // --- Outputs ---
     let alarms_ctrl = AlarmsControl {
