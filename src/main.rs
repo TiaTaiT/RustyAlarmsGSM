@@ -44,6 +44,9 @@ pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 struct SystemState {
     alarm_stack: AlarmStack,
     alive_countdown: i32,
+    pending_dtmf: Option<String<DTMF_PACKET_LENGTH>>,
+    retry_countdown: Option<u32>,
+    pending_alive_message: bool,
     battery_level: u16,
     tamper_detected: bool,
     adc_values: [u16; 3],
@@ -54,6 +57,9 @@ struct SystemState {
 static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState {
     alarm_stack: AlarmStack::new(),
     alive_countdown: 0,
+    pending_dtmf: None,
+    retry_countdown: None,
+    pending_alive_message: false,
     battery_level: 0,
     tamper_detected: false,
     adc_values: [0; 3],
@@ -341,9 +347,20 @@ async fn run_logic(
                 }
                 SimEvent::CallExecuted(success) => {
                     if success {
+                        let mut state = STATE.lock().await;
+                        state.alarm_stack.acknowledge_export();
+                        state.pending_dtmf = None;
+                        state.retry_countdown = None;
+                        state.pending_alive_message = false;
+
                         leds.set_action(PowerState::On);
                         Timer::after(Duration::from_secs(1)).await;
                         leds.set_action(PowerState::Off);
+                    } else {
+                        let mut state = STATE.lock().await;
+                        if state.pending_dtmf.is_some() {
+                            state.retry_countdown = Some(CALLBACK_PERIOD_MINUTES);
+                        }
                     }
                 }
                 SimEvent::TimeReceived(time) => {
@@ -368,7 +385,25 @@ async fn run_logic(
                         let mut state = STATE.lock().await;
                         let tick = state.alive_countdown <= 0;
 
-                        if state.alarm_stack.has_changes() || tick {
+                        if let Some(countdown) = state.retry_countdown.as_mut() {
+                            if *countdown > 0 {
+                                *countdown -= 1;
+                            }
+                        }
+
+                        let should_retry = matches!(state.retry_countdown, Some(0));
+                        let should_send_new = state.pending_dtmf.is_none()
+                            && !state.pending_alive_message
+                            && (state.alarm_stack.has_changes() || tick);
+
+                        if should_retry {
+                            pending_dtmf = state.pending_dtmf.clone();
+                            if pending_dtmf.is_some() {
+                                state.retry_countdown = Some(CALLBACK_PERIOD_MINUTES);
+                            } else {
+                                state.retry_countdown = None;
+                            }
+                        } else if should_send_new {
                             let bits = state.alarm_stack.export_bits();
                             let str_stack: String<DTMF_PACKET_LENGTH> = bits.iter().collect();
                             state.alive_countdown = ALIVE_PERIOD_MINUTES + 1;
@@ -406,6 +441,9 @@ async fn run_logic(
                                 pending_sms = Some(msg);
                                 is_sms = true;
                             } else {
+                                state.pending_dtmf = Some(str_stack.clone());
+                                state.retry_countdown = None;
+                                state.pending_alive_message = tick;
                                 pending_dtmf = Some(str_stack);
                             }
                         }

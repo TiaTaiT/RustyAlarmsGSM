@@ -9,8 +9,9 @@ const SECOND_STACK_INDEX: usize = 1;
 pub trait AlarmTracker {
     fn push(&mut self, alarms: &[bool; ALARMS_CHANNELS_AMOUNT]);
     fn has_changes(&self) -> bool;
-    fn export_bits(&mut self) -> [char; ALARMS_MESSAGE_STRING_LENGTH];
+    fn export_bits(&self) -> [char; ALARMS_MESSAGE_STRING_LENGTH];
     fn import_bits(&mut self, bits: [char; ALARMS_MESSAGE_STRING_LENGTH]);
+    fn acknowledge_export(&mut self);
 }
 
 pub struct AlarmStack {
@@ -62,7 +63,7 @@ impl AlarmTracker for AlarmStack {
         false
     }
     
-    fn export_bits(&mut self) -> [char; ALARMS_MESSAGE_STRING_LENGTH] {
+    fn export_bits(&self) -> [char; ALARMS_MESSAGE_STRING_LENGTH] {
         debug!("Exporting alarm bits...");
         
         let mut result = ['0'; ALARMS_MESSAGE_STRING_LENGTH];
@@ -76,8 +77,6 @@ impl AlarmTracker for AlarmStack {
             result[col] = (acc + b'0') as char;
         }
 
-        self.stack[FIRST_STACK_INDEX] = self.stack[ALARMS_STACK_DEPTH - 1];
-        self.counter = 1;
         result
     }
     
@@ -88,6 +87,11 @@ impl AlarmTracker for AlarmStack {
                 self.stack[row][col] = ((digit >> row) & 1) != 0;
             }
         }
+    }
+
+    fn acknowledge_export(&mut self) {
+        self.stack[FIRST_STACK_INDEX] = self.stack[ALARMS_STACK_DEPTH - 1];
+        self.counter = 1;
     }
 }
 
