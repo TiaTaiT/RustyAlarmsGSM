@@ -364,10 +364,18 @@ impl Sim800Driver {
     }
 
     async fn restore_usb_modem_mode_if_needed(&mut self) {
-        if self.usb_connected {
+        #[cfg(feature = "receiver")]
+        {
             self.power_on().await;
-        } else {
-            self.power_off().await;
+        }
+
+        #[cfg(not(feature = "receiver"))]
+        {
+            if self.usb_connected {
+                self.power_on().await;
+            } else {
+                self.power_off().await;
+            }
         }
     }
 
@@ -639,6 +647,11 @@ impl Sim800Driver {
                             self.usb_connected = false;
                             self.usb_cmd_mode = false;
                             self.usb_cmd_buf.clear();
+
+                            #[cfg(feature = "receiver")]
+                            self.power_on().await;
+
+                            #[cfg(not(feature = "receiver"))]
                             self.power_off().await;
                         }
                         Command::SendMessage {
