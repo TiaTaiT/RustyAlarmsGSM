@@ -28,7 +28,9 @@ use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
-use crate::hardware::{Hardware, PowerState, StatusLeds, SystemSensors};
+use crate::hardware::{Hardware, LedInterface, PowerState, StatusLeds, SystemSensors};
+#[cfg(feature = "receiver")]
+use crate::hardware::RelayInterface;
 use crate::rtc::RtcControl;
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 use static_cell::StaticCell;
@@ -230,21 +232,15 @@ async fn monitor_task(mut sensors: SystemSensors) {
             (v, b)
         };
 
-        // remove after board testing, just to see values in logs
-        // #[cfg(feature = "transmitter")]
-        // info!("ADC Values: {}, {}, {}, {}", bools[0], bools[1], bools[2], bools[3]);
-
         #[cfg(not(feature = "transmitter"))]
         let (values, bools) = ([0u16; 3], [false; 4]);
 
-        // Transmitter: Read Alarms
         #[cfg(feature = "transmitter")]
         {
             let mut state = STATE.lock().await;
             state.alarm_stack.push(&bools);
         }
 
-        // Both: Read System health
         let battery = sensors.read_battery_voltage().await;
         let tamper = sensors.is_housing_open();
         let power = sensors.is_power_connected();
@@ -279,10 +275,39 @@ async fn logic_task(leds: StatusLeds, mut relays: AlarmRelays) {
     run_logic(leds, &mut relays).await;
 }
 
+#[cfg(feature = "transmitter")]
+async fn visualize_leds<L: LedInterface>(leds: &mut L, alarm_str: &str) {
+    visualize_common(alarm_str, |idx, state| {
+        leds.set_by_index(idx + 1, state);
+    })
+    .await;
+}
+
+#[cfg(feature = "receiver")]
+async fn visualize_relays<L: LedInterface, R: RelayInterface>(
+    relays: &mut R,
+    leds: &mut L,
+    alarm_str: &str,
+) {
+    visualize_common(alarm_str, |idx, state| {
+        relays.set(idx, state);
+        leds.set_by_index(idx + 1, state);
+
+        let mut bits = RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed);
+        if state == PowerState::On {
+            bits |= 1 << idx;
+        } else {
+            bits &= !(1 << idx);
+        }
+        RELAY_STATES.store(bits, core::sync::atomic::Ordering::Relaxed);
+    })
+    .await;
+}
+
 async fn run_logic(
-    mut leds: StatusLeds,
+    mut leds: impl LedInterface,
     #[cfg(feature = "receiver")]
-    relays: &mut AlarmRelays,
+    relays: &mut impl RelayInterface,
     #[cfg(feature = "transmitter")]
     use_sms: bool
 ) {
@@ -482,33 +507,6 @@ async fn run_logic(
             }
         }
     }
-}
-
-// Helper for Transmitter (Just LEDs)
-#[cfg(feature = "transmitter")]
-async fn visualize_leds(leds: &mut StatusLeds, alarm_str: &str) {
-    visualize_common(alarm_str, |idx, state| {
-        leds.set_by_index(idx + 1, state); // Map 0..3 to LED 1..4
-    })
-    .await;
-}
-
-// Helper for Receiver (Relays + LEDs)
-#[cfg(feature = "receiver")]
-async fn visualize_relays(relays: &mut AlarmRelays, leds: &mut StatusLeds, alarm_str: &str) {
-    visualize_common(alarm_str, |idx, state| {
-        relays.set(idx, state); // Relays 0..3
-        leds.set_by_index(idx + 1, state); // LEDs 1..4 (Optional, visual feedback)
-
-        let mut bits = RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed);
-        if state == PowerState::On {
-            bits |= 1 << idx;
-        } else {
-            bits &= !(1 << idx);
-        }
-        RELAY_STATES.store(bits, core::sync::atomic::Ordering::Relaxed);
-    })
-    .await;
 }
 
 async fn visualize_common<F>(alarm_str: &str, mut set_output: F)

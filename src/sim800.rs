@@ -7,7 +7,7 @@ use crate::constants::*;
 use crate::custom_strings::{
     extract_after_delimiter, extract_between_delimiters, separate_chars_by_commas,
 };
-use crate::hardware::{ModemControl, ModemRx, ModemTx, PowerState};
+use crate::hardware::{ModemControl, ModemControlInterface, ModemRx, ModemTx, PowerState};
 use crate::phone_book::PhoneBook;
 use crate::rtc::GsmTime;
 
@@ -15,6 +15,10 @@ use crate::USB_RX_PIPE;
 use crate::USB_TX_PIPE;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
+
+const HANDSHAKE_TIMEOUT_MS: u64 = 2000;
+const DEFAULT_TIMEOUT_MS: u64 = 1000;
+const HANDSHAKE_ATTEMPTS: usize = 5;
 
 // Types for communication
 #[derive(Clone, defmt::Format, PartialEq)]
@@ -58,10 +62,10 @@ pub enum SimEvent {
     TimeReceived(GsmTime),
 }
 
-pub struct Sim800Driver {
+pub struct Sim800Driver<C = ModemControl> {
     tx: ModemTx,
     rx: ModemRx,
-    control: ModemControl,
+    control: C,
     phone_book: PhoneBook,
     line_buf: [u8; 128],
     last_alarm_dtmf: String<DTMF_PACKET_LENGTH>,
@@ -72,8 +76,8 @@ pub struct Sim800Driver {
     is_powered: bool,
 }
 
-impl Sim800Driver {
-    pub fn new(tx: ModemTx, rx: ModemRx, control: ModemControl) -> Self {
+impl<C: ModemControlInterface> Sim800Driver<C> {
+    pub fn new(tx: ModemTx, rx: ModemRx, control: C) -> Self {
         Self {
             tx,
             rx,
@@ -263,25 +267,26 @@ impl Sim800Driver {
         // 2. Handshake
         let mut attempts = 0;
         loop {
-            if self.send_cmd_wait_ok("AT", 1000).await.is_ok() {
+            
+            if self.send_cmd_wait_ok("AT", HANDSHAKE_TIMEOUT_MS).await.is_ok() {
                 break;
             }
             attempts += 1;
-            if attempts > 5 {
+            if attempts > HANDSHAKE_ATTEMPTS {
                 error!("AT Handshake failed after {} attempts", attempts);
                 break;
             }
             Timer::after(Duration::from_millis(500)).await;
         }
-        let _ = self.send_cmd_wait_ok("ATE0", 1000).await;
+        let _ = self.send_cmd_wait_ok("ATE0", DEFAULT_TIMEOUT_MS).await;
 
         // 3. Check and Fix Time Sync (CLTS)
         // This ensures the setting is written to ROM and the module reboots if needed.
         match self.check_clts_enabled().await {
             Ok(false) => {
                 info!("CLTS disabled. Enabling, Saving and Rebooting module...");
-                let _ = self.send_cmd_wait_ok("AT+CLTS=1", 1000).await;
-                let _ = self.send_cmd_wait_ok("AT&W", 1000).await; // Write to ROM
+                let _ = self.send_cmd_wait_ok("AT+CLTS=1", DEFAULT_TIMEOUT_MS).await;
+                let _ = self.send_cmd_wait_ok("AT&W", DEFAULT_TIMEOUT_MS).await; // Write to ROM
 
                 // Reset module to apply changes
                 // AT+CFUN=1,1 -> Full functionality, Reset
@@ -291,8 +296,8 @@ impl Sim800Driver {
                 Timer::after(Duration::from_secs(8)).await;
 
                 // Re-handshake after reboot
-                let _ = self.send_cmd_wait_ok("AT", 1000).await;
-                let _ = self.send_cmd_wait_ok("ATE0", 1000).await;
+                let _ = self.send_cmd_wait_ok("AT", DEFAULT_TIMEOUT_MS).await;
+                let _ = self.send_cmd_wait_ok("ATE0", DEFAULT_TIMEOUT_MS).await;
                 info!("Module rebooted. CLTS should be active.");
             }
             Ok(true) => {
@@ -318,7 +323,7 @@ impl Sim800Driver {
         for cmd in cmds {
             let mut attempts = 0;
             loop {
-                if self.send_cmd_wait_ok(cmd, 1000).await.is_ok() {
+                if self.send_cmd_wait_ok(cmd, DEFAULT_TIMEOUT_MS).await.is_ok() {
                     break;
                 }
                 attempts += 1;
@@ -435,7 +440,7 @@ impl Sim800Driver {
         .await;
 
         if result.is_err() {
-            self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+            self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
             return Err(());
         }
 
@@ -446,7 +451,7 @@ impl Sim800Driver {
             let _ = write!(cmd, "AT+VTS=\"{}\"", csv);
             self.send_cmd_wait_ok(&cmd, 5000).await?;
         } else {
-            self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+            self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
             return Err(());
         }
 
@@ -460,12 +465,12 @@ impl Sim800Driver {
                 if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
                     let c = val.trim().chars().next().unwrap_or('\0');
                     if c == CONFIRMATION_SIGNAL.chars().next().unwrap_or('\0') {
-                        self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+                        self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
                         return Ok::<(), ()>(());
                     }
                 }
                 if line.contains(CONFIRMATION_SIGNAL) {
-                    self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+                    self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
                     return Ok::<(), ()>(());
                 }
             }
@@ -473,7 +478,7 @@ impl Sim800Driver {
         .await;
 
         if confirm_res.is_err() {
-            self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
+            self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
         }
 
         match confirm_res {

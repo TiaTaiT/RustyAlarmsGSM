@@ -1,7 +1,7 @@
 // /src/hardware.rs
 // Hardware Abstraction Layer
 // This module encapsulates all hardware-specific details of the board.
-// Do not expose raw peripherals or pins outside this module. Instead, provide high-level methods on the public structs defined here.
+// Do not expose raw peripherals or pins outside this module. Instead, use traits.
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_stm32::adc::{Adc, AnyAdcChannel, SampleTime};
 use embassy_stm32::adc::AdcChannel; // Required for .degrade_adc()
@@ -49,6 +49,49 @@ pub enum PowerState {
     Off,
 }
 
+pub trait LedInterface {
+    fn set_system(&mut self, state: PowerState);
+    fn set_alarm1(&mut self, state: PowerState);
+    fn set_alarm2(&mut self, state: PowerState);
+    fn set_alarm3(&mut self, state: PowerState);
+
+    fn set_by_index(&mut self, index: usize, state: PowerState) {
+        match index {
+            1 => self.set_system(state),
+            2 => self.set_alarm1(state),
+            3 => self.set_alarm2(state),
+            4 => self.set_alarm3(state),
+            _ => {}
+        }
+    }
+}
+
+pub trait ModemControlInterface {
+    fn set_power_key(&mut self, state: PowerState);
+    fn set_dc_power(&mut self, state: PowerState);
+}
+
+#[cfg(feature = "receiver")]
+pub trait RelayInterface {
+    fn set(&mut self, index: usize, state: PowerState);
+    fn set_all(&mut self, state: PowerState);
+}
+
+pub trait SensorInterface {
+    #[cfg(feature = "transmitter")]
+    async fn read_alarms(&mut self) -> [u16; 3];
+
+    async fn read_battery_voltage(&mut self) -> u16;
+    fn is_power_connected(&self) -> bool;
+    fn is_housing_open(&self) -> bool;
+}
+
+#[cfg(feature = "transmitter")]
+pub trait AlarmControlInterface {
+    fn set_pullup(&mut self, state: PowerState);
+    fn is_sms_enabled(&self) -> bool;
+}
+
 // Helper to avoid borrow-checker conflicts when mutating pins
 fn apply_state(pin: &mut Output<'static>, state: PowerState) {
     match state {
@@ -70,16 +113,13 @@ impl StatusLeds {
     pub fn set_alarm1   (&mut self, state: PowerState) { apply_state(&mut self.alarm1_led, state); }
     pub fn set_alarm2 (&mut self, state: PowerState) { apply_state(&mut self.alarm2_led, state); }
     pub fn set_alarm3(&mut self, state: PowerState) { apply_state(&mut self.alarm3_led, state); }
+}
 
-    pub fn set_by_index(&mut self, index: usize, state: PowerState) {
-        match index {
-            1 => self.set_system(state),
-            2 => self.set_alarm1(state),
-            3 => self.set_alarm2(state),
-            4 => self.set_alarm3(state),
-            _ => {}
-        }
-    }
+impl LedInterface for StatusLeds {
+    fn set_system(&mut self, state: PowerState) { StatusLeds::set_system(self, state); }
+    fn set_alarm1(&mut self, state: PowerState) { StatusLeds::set_alarm1(self, state); }
+    fn set_alarm2(&mut self, state: PowerState) { StatusLeds::set_alarm2(self, state); }
+    fn set_alarm3(&mut self, state: PowerState) { StatusLeds::set_alarm3(self, state); }
 }
 
 // --- Component: Modem Control ---
@@ -92,6 +132,11 @@ pub struct ModemControl {
 impl ModemControl {
     pub fn set_power_key(&mut self, state: PowerState) { apply_state(&mut self.power_key, state); }
     pub fn set_dc_power (&mut self, state: PowerState) { apply_state(&mut self.dc_power,  state); }
+}
+
+impl ModemControlInterface for ModemControl {
+    fn set_power_key(&mut self, state: PowerState) { ModemControl::set_power_key(self, state); }
+    fn set_dc_power(&mut self, state: PowerState) { ModemControl::set_dc_power(self, state); }
 }
 
 // --- Component: Alarm Relays (receiver only) ---
@@ -113,6 +158,12 @@ impl AlarmRelays {
             apply_state(pin, state);
         }
     }
+}
+
+#[cfg(feature = "receiver")]
+impl RelayInterface for AlarmRelays {
+    fn set(&mut self, index: usize, state: PowerState) { AlarmRelays::set(self, index, state); }
+    fn set_all(&mut self, state: PowerState) { AlarmRelays::set_all(self, state); }
 }
 
 // --- Component: System Sensors ---
@@ -144,6 +195,15 @@ impl SystemSensors {
     
 }
 
+impl SensorInterface for SystemSensors {
+    #[cfg(feature = "transmitter")]
+    async fn read_alarms(&mut self) -> [u16; 3] { SystemSensors::read_alarms(self).await }
+
+    async fn read_battery_voltage(&mut self) -> u16 { SystemSensors::read_battery_voltage(self).await }
+    fn is_power_connected(&self) -> bool { SystemSensors::is_power_connected(self) }
+    fn is_housing_open(&self) -> bool { SystemSensors::is_housing_open(self) }
+}
+
 pub struct AlarmsControl {
     alarms_pullup: Output<'static>,
     is_sms_option:  Input<'static>,
@@ -152,6 +212,12 @@ pub struct AlarmsControl {
 impl AlarmsControl {
     pub fn set_pullup(&mut self, state: PowerState) { apply_state(&mut self.alarms_pullup, state); }
     pub fn is_sms_enabled   (&self) -> bool { self.is_sms_option.is_high() }
+}
+
+#[cfg(feature = "transmitter")]
+impl AlarmControlInterface for AlarmsControl {
+    fn set_pullup(&mut self, state: PowerState) { AlarmsControl::set_pullup(self, state); }
+    fn is_sms_enabled(&self) -> bool { AlarmsControl::is_sms_enabled(self) }
 }
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
