@@ -1,6 +1,6 @@
 use heapless::Vec;
 
-use crate::rtc::GsmTime;
+use crate::hardware::GsmTime;
 
 impl GsmTime {
     fn parse_u8(s: &[u8]) -> Option<u8> {

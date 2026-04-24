@@ -1,38 +1,30 @@
-// /src/rtc.rs
+// /src/hardware/rtc_stm32.rs
 use embassy_stm32::pac::{PWR, RCC, RTC};
 
-#[derive(Debug, Clone, Copy, defmt::Format)]
-pub struct GsmTime{
-    pub year: u8,
-    pub month: u8,
-    pub day: u8,
-    pub hour: u8,
-    pub minute: u8,
-    pub second: u8,
-}
+use super::traits::{GsmTime, Rtc};
 
-/// RTC control using LSE/LSI as clock source.
-pub struct RtcControl {
+/// STM32 RTC implementation using LSI
+pub struct Stm32Rtc {
     _private: (),
 }
 
-impl RtcControl {
-    /// Initialize RTC; uses LSI (~37 kHz) as source.
-    pub fn init() -> Self {
-        // Critical section not strictly required if called in main before tasks
-        
-        // Enable PWR clock and backup access
+impl Rtc for Stm32Rtc {
+    fn init() -> Self {
+        // Enable PWR clock
         RCC.apb1enr().modify(|w| w.set_pwren(true));
+
+        // Enable backup domain access
         PWR.cr().modify(|w| w.set_dbp(true));
 
         // Enable LSI
         RCC.csr().modify(|w| w.set_lsion(true));
         while !RCC.csr().read().lsirdy() {}
 
-        // Select LSI and Enable RTC
-        // STM32L0: RTCSEL and RTCEN are in RCC_CSR
+        // Select LSI as RTC clock
         RCC.csr().modify(|w| {
-            w.set_rtcsel(embassy_stm32::pac::rcc::vals::Rtcsel::LSI);
+            w.set_rtcsel(
+                embassy_stm32::pac::rcc::vals::Rtcsel::LSI
+            );
             w.set_rtcen(true);
         });
 
@@ -42,30 +34,25 @@ impl RtcControl {
         rtc.wpr().write(|w| w.set_key(0xCA));
         rtc.wpr().write(|w| w.set_key(0x53));
 
-        // Clear RSF
-        rtc.isr().modify(|w| w.set_rsf(false));
-
         // Enter init mode
         rtc.isr().modify(|w| w.set_init(true));
         while !rtc.isr().read().initf() {}
 
-        // Configure prescalers for ~37kHz -> 1Hz
-        // Synch = 0x0120 (288), Asynch = 0x7F (127) => 40kHz approx correction
+        // Prescalers for ~1 Hz
         rtc.prer().modify(|w| {
             w.set_prediv_a(0x7F);
             w.set_prediv_s(0x0120);
         });
 
-        // Exit init mode
+        // Exit init
         rtc.isr().modify(|w| w.set_init(false));
 
-        // Re-enable write protection
         rtc.wpr().write(|w| w.set_key(0xFF));
 
-        RtcControl { _private: () }
+        Self { _private: () }
     }
 
-    pub fn set_time(&mut self, time: GsmTime) {
+    fn set_time(&mut self, time: GsmTime) {
         let rtc = RTC;
 
         rtc.wpr().write(|w| w.set_key(0xCA));
@@ -74,16 +61,7 @@ impl RtcControl {
         rtc.isr().modify(|w| w.set_init(true));
         while !rtc.isr().read().initf() {}
 
-        // BCD conversion
-        let bcd = |v: u8| ((v / 10) << 4) | (v % 10);
-
         rtc.dr().write(|w| {
-            w.set_dt(bcd(time.day));
-            w.set_du(bcd(time.day) & 0xF); // Actually PAC handles BCD splitting usually, but simplified here
-            // Note: STM32F0 PAC usually expects pre-formatted BCD in bits or raw values depending on crate version.
-            // Using generic manual bit shifting based on original code logic:
-            
-            // Re-implementing based on standard registers
             w.set_dt(time.day / 10);
             w.set_du(time.day % 10);
             w.set_mt((time.month / 10) > 0);
@@ -102,11 +80,13 @@ impl RtcControl {
         });
 
         rtc.isr().modify(|w| w.set_init(false));
+
         rtc.wpr().write(|w| w.set_key(0xFF));
     }
 
-    pub fn get_time(&self) -> GsmTime {
+    fn get_time(&self) -> GsmTime {
         let rtc = RTC;
+
         rtc.isr().modify(|w| w.set_rsf(false));
         while !rtc.isr().read().rsf() {}
 
@@ -116,11 +96,18 @@ impl RtcControl {
         let day = dr.dt() * 10 + dr.du();
         let month = (dr.mt() as u8) * 10 + dr.mu();
         let year = dr.yt() * 10 + dr.yu();
-        
+
         let hour = tr.ht() * 10 + tr.hu();
         let minute = tr.mnt() * 10 + tr.mnu();
         let second = tr.st() * 10 + tr.su();
 
-        GsmTime { year, month, day, hour, minute, second }
+        GsmTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+        }
     }
 }

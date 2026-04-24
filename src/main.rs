@@ -21,25 +21,24 @@ mod date_converter;
 mod gsm_time_converter;
 mod hardware;
 mod phone_book;
-mod rtc;
 mod sim800;
 
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
-use crate::hardware::{Hardware, LedInterface, PowerState, StatusLeds, SystemSensors};
+use crate::hardware::{Hardware, LedInterface, PowerState, RtcControl, StatusLeds, SystemSensors};
 #[cfg(feature = "receiver")]
 use crate::hardware::RelayInterface;
-use crate::rtc::RtcControl;
 use crate::sim800::{Command, Sim800Driver, SimEvent};
+use crate::hardware::Rtc;
 use static_cell::StaticCell;
 
 // --- Global Signals/Channels ---
 static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new();
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SimEvent, 4> = Channel::new();
 static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
-
+static RTC_STATE: StaticCell<Mutex<CriticalSectionRawMutex, RtcControl>> = StaticCell::new();
 pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
 pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
@@ -69,8 +68,6 @@ static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemSta
     power_connected: false,
 });
 
-static RTC: Mutex<CriticalSectionRawMutex, Option<RtcControl>> = Mutex::new(None);
-
 #[cfg(feature = "receiver")]
 static RELAY_STATES: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
@@ -91,12 +88,7 @@ async fn main(spawner: Spawner) {
     #[cfg(feature = "receiver")]
     let relays = hw.relays;
 
-    // RTC Init
-    {
-        let rtc_ctrl = RtcControl::init();
-        let mut rtc_lock = RTC.lock().await;
-        *rtc_lock = Some(rtc_ctrl);
-    }
+    let rtc = RTC_STATE.init(Mutex::new(RtcControl::init()));
 
     info!("Starting Embassy800c on STM32L0...");
     leds.set_system(PowerState::On);
@@ -106,12 +98,11 @@ async fn main(spawner: Spawner) {
     spawner.spawn(sim800_task(tx, rx, sim_control).unwrap());
     spawner.spawn(monitor_task(sensors).unwrap());
 
-    // Pass relays to logic task if receiver
-    #[cfg(feature = "receiver")]
-    spawner.spawn(logic_task(leds, relays).unwrap());
-
     #[cfg(feature = "transmitter")]
-    spawner.spawn(logic_task(leds, alarms_ctrl).unwrap());
+    spawner.spawn(logic_task(leds, alarms_ctrl, rtc).unwrap());
+
+    #[cfg(feature = "receiver")]
+    spawner.spawn(logic_task(leds, relays, rtc).unwrap());
 
     spawner.spawn(system_monitor_task().unwrap());
 
@@ -263,16 +254,24 @@ async fn monitor_task(mut sensors: SystemSensors) {
 
 #[cfg(feature = "transmitter")]
 #[embassy_executor::task]
-async fn logic_task(leds: StatusLeds, mut alarms_ctrl: hardware::AlarmsControl) {
+async fn logic_task(
+    leds: StatusLeds,
+    mut alarms_ctrl: hardware::AlarmsControl,
+    rtc: &'static Mutex<CriticalSectionRawMutex, RtcControl>,
+) {
     alarms_ctrl.set_pullup(PowerState::On);
     let use_sms = alarms_ctrl.is_sms_enabled();
-    run_logic(leds, use_sms).await;
+    run_logic(leds, rtc, use_sms).await;
 }
 
 #[cfg(feature = "receiver")]
 #[embassy_executor::task]
-async fn logic_task(leds: StatusLeds, mut relays: AlarmRelays) {
-    run_logic(leds, &mut relays).await;
+async fn logic_task(
+    leds: StatusLeds,
+    mut relays: AlarmRelays,
+    rtc: &'static Mutex<CriticalSectionRawMutex, RtcControl>,
+) {
+    run_logic(leds, &mut relays, rtc).await;
 }
 
 #[cfg(feature = "transmitter")]
@@ -308,6 +307,7 @@ async fn run_logic(
     mut leds: impl LedInterface,
     #[cfg(feature = "receiver")]
     relays: &mut impl RelayInterface,
+    rtc: &'static Mutex<CriticalSectionRawMutex, RtcControl>,
     #[cfg(feature = "transmitter")]
     use_sms: bool
 ) {
@@ -389,10 +389,8 @@ async fn run_logic(
                     }
                 }
                 SimEvent::TimeReceived(time) => {
-                    let mut rtc = RTC.lock().await;
-                    if let Some(ref mut rtc_ctrl) = *rtc {
-                        rtc_ctrl.set_time(time);
-                    }
+                    let mut rtc = rtc.lock().await;
+                    rtc.set_time(time);
                 }
             },
 
@@ -435,22 +433,9 @@ async fn run_logic(
 
                             if use_sms {
                                 let time_buf = {
-                                    let rtc = RTC.lock().await;
-                                    if let Some(ref rtc_ctrl) = *rtc {
-                                        let t = rtc_ctrl.get_time();
-                                        crate::date_converter::format_gsm_time(&t)
-                                    } else {
-                                        crate::date_converter::format_gsm_time(
-                                            &crate::rtc::GsmTime {
-                                                year: 0,
-                                                month: 0,
-                                                day: 0,
-                                                hour: 0,
-                                                minute: 0,
-                                                second: 0,
-                                            },
-                                        )
-                                    }
+                                    let rtc = rtc.lock().await;
+                                    let t = rtc.get_time();
+                                    crate::date_converter::format_gsm_time(&t)
                                 };
                                 let mut msg = String::<SIM800_LINE_BUFFER_SIZE>::new();
                                 use core::fmt::Write;

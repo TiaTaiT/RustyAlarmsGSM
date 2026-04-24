@@ -3,6 +3,7 @@ pub mod alarms;
 pub mod init;
 pub mod leds;
 pub mod modem;
+pub mod rtc_stm32;
 pub mod relays;
 pub mod sensors;
 pub mod traits;
@@ -12,10 +13,11 @@ pub use alarms::AlarmsControl;
 pub use init::{init, Hardware};
 pub use leds::StatusLeds;
 pub use modem::{ModemControl, ModemRx, ModemTx};
+pub use rtc_stm32::Stm32Rtc as RtcControl;
 #[cfg(feature = "receiver")]
 pub use relays::AlarmRelays;
 pub use sensors::SystemSensors;
-pub use traits::{LedInterface, ModemControlInterface, PowerState, SensorInterface};
+pub use traits::{GsmTime, LedInterface, ModemControlInterface, PowerState, Rtc, SensorInterface};
 #[cfg(feature = "receiver")]
 pub use traits::RelayInterface;
 #[cfg(feature = "transmitter")]

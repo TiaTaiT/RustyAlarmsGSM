@@ -1,7 +1,7 @@
 // /src/date_converter.rs
 use core::fmt::{self, Write};
 
-use crate::rtc::GsmTime;
+use crate::hardware::GsmTime;
 
 // Fixed buffer to format "yymmddhhmmss" (12 characters)
 pub struct TimeBuffer {
