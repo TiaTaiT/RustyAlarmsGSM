@@ -60,23 +60,23 @@ fn apply_state(pin: &mut Output<'static>, state: PowerState) {
 // --- Component: Status LEDs ---
 pub struct StatusLeds {
     sys_led: Output<'static>,
-    gsm_led: Output<'static>,
-    err_led: Output<'static>,
-    act_led: Output<'static>,
+    alarm1_led: Output<'static>,
+    alarm2_led: Output<'static>,
+    alarm3_led: Output<'static>,
 }
 
 impl StatusLeds {
     pub fn set_system(&mut self, state: PowerState) { apply_state(&mut self.sys_led, state); }
-    pub fn set_gsm   (&mut self, state: PowerState) { apply_state(&mut self.gsm_led, state); }
-    pub fn set_error (&mut self, state: PowerState) { apply_state(&mut self.err_led, state); }
-    pub fn set_action(&mut self, state: PowerState) { apply_state(&mut self.act_led, state); }
+    pub fn set_alarm1   (&mut self, state: PowerState) { apply_state(&mut self.alarm1_led, state); }
+    pub fn set_alarm2 (&mut self, state: PowerState) { apply_state(&mut self.alarm2_led, state); }
+    pub fn set_alarm3(&mut self, state: PowerState) { apply_state(&mut self.alarm3_led, state); }
 
     pub fn set_by_index(&mut self, index: usize, state: PowerState) {
         match index {
             1 => self.set_system(state),
-            2 => self.set_gsm(state),
-            3 => self.set_error(state),
-            4 => self.set_action(state),
+            2 => self.set_alarm1(state),
+            3 => self.set_alarm2(state),
+            4 => self.set_alarm3(state),
             _ => {}
         }
     }
@@ -238,8 +238,8 @@ pub fn build_usb(
         0x16c0, // VID — replace (see https://pid.codes for open-source projects)
         0x27dd, // PID — replace
     );
-    cfg.manufacturer  = Some("YourCompany");
-    cfg.product       = Some("CDC Serial");
+    cfg.manufacturer  = Some("Investstroy");
+    cfg.product       = Some("USB-UART Bridge");
     cfg.serial_number = Some("00000001");
     cfg.max_power         = 100; // mA draw reported to host (≤500 for bus-powered)
     cfg.max_packet_size_0 = 64;
@@ -312,9 +312,9 @@ pub fn init() -> Hardware {
 
     let leds = StatusLeds {
         sys_led: Output::new(p.PB12, Level::Low, Speed::Low),
-        gsm_led: Output::new(p.PB13, Level::Low, Speed::Low),
-        err_led: Output::new(p.PB14, Level::Low, Speed::Low),
-        act_led: Output::new(p.PB15, Level::Low, Speed::Low),
+        alarm1_led: Output::new(p.PB13, Level::Low, Speed::Low),
+        alarm2_led: Output::new(p.PB14, Level::Low, Speed::Low),
+        alarm3_led: Output::new(p.PB15, Level::Low, Speed::Low),
     };
 
     // --- UART ---

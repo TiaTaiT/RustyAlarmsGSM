@@ -353,9 +353,9 @@ async fn run_logic(
                         state.retry_countdown = None;
                         state.pending_alive_message = false;
 
-                        leds.set_action(PowerState::On);
+                        leds.set_alarm3(PowerState::On);
                         Timer::after(Duration::from_secs(1)).await;
-                        leds.set_action(PowerState::Off);
+                        leds.set_alarm3(PowerState::Off);
                     } else {
                         let mut state = STATE.lock().await;
                         if state.pending_dtmf.is_some() {
@@ -468,9 +468,9 @@ async fn run_logic(
             Either3::Third(_) => {
                 info!("Watchdog expired. Resetting outputs.");
                 leds.set_system(PowerState::Off);
-                leds.set_gsm(PowerState::Off);
-                leds.set_error(PowerState::Off);
-                leds.set_action(PowerState::Off);
+                leds.set_alarm1(PowerState::Off);
+                leds.set_alarm2(PowerState::Off);
+                leds.set_alarm3(PowerState::Off);
 
                 #[cfg(feature = "receiver")]
                 {
