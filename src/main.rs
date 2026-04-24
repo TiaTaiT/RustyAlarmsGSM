@@ -23,6 +23,9 @@ mod hardware;
 mod phone_book;
 mod sim800;
 
+#[cfg(test)]
+mod tests;
+
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
