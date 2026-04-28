@@ -13,6 +13,7 @@ pub mod sim800_parser;
 pub mod sim800_logic;
 pub mod app_logic;
 pub mod mcu_commands;
+pub mod runtime;
 pub mod visualization;
 
 #[cfg(not(test))]

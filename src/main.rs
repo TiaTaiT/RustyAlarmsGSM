@@ -10,7 +10,6 @@ use embassy_futures::select::{Either3, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::pipe::Pipe;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::String;
 
@@ -23,6 +22,7 @@ mod gsm_time_converter;
 mod hardware;
 mod mcu_commands;
 mod phone_book;
+mod runtime;
 mod sim800;
 mod sim800_logic;
 mod sim800_parser;
@@ -39,7 +39,7 @@ use crate::hardware::AlarmRelays;
 use crate::hardware::{Hardware, LedInterface, PowerState, RtcControl, StatusLeds, SystemSensors};
 #[cfg(feature = "receiver")]
 use crate::hardware::RelayInterface;
-use crate::mcu_commands::{SystemSnapshot, format_mcu_reply};
+use crate::runtime::{RUNTIME_SNAPSHOT, USB_RX_PIPE, USB_TX_PIPE};
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 use crate::hardware::Rtc;
 use static_cell::StaticCell;
@@ -50,8 +50,6 @@ static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new(
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SimEvent, 4> = Channel::new();
 static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
 static RTC_STATE: StaticCell<Mutex<CriticalSectionRawMutex, RtcControl>> = StaticCell::new();
-pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
-pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
 struct SystemState {
     logic: LogicState,
@@ -251,6 +249,18 @@ async fn monitor_task(mut sensors: SystemSensors) {
             state.power_connected = power;
         }
 
+        {
+            let mut snapshot = RUNTIME_SNAPSHOT.lock().await;
+            snapshot.battery_level = battery;
+            snapshot.tamper_detected = tamper;
+            snapshot.power_connected = power;
+            #[cfg(feature = "transmitter")]
+            {
+                snapshot.adc_values = values;
+                snapshot.current_alarms = bools;
+            }
+        }
+
         Timer::after(Duration::from_millis(500)).await;
     }
 }
@@ -422,33 +432,6 @@ async fn system_monitor_task() {
         ))
         .await;
         CMD_CHANNEL.send(Command::UpdateTime).await;
-    }
-}
-
-pub async fn execute_mcu_command(cmd: &str) {
-    let snapshot = {
-        let state = STATE.lock().await;
-        SystemSnapshot {
-            battery_level: state.battery_level,
-            tamper_detected: state.tamper_detected,
-            power_connected: state.power_connected,
-            #[cfg(feature = "transmitter")]
-            adc_values: state.adc_values,
-            #[cfg(feature = "transmitter")]
-            current_alarms: state.current_alarms,
-            #[cfg(feature = "receiver")]
-            relay_bits: RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed),
-        }
-    };
-
-    let reply = format_mcu_reply(&snapshot, cmd);
-
-    let bytes = reply.as_bytes();
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let space = core::cmp::min(bytes.len() - offset, 64);
-        let _ = USB_TX_PIPE.write(&bytes[offset..offset + space]).await;
-        offset += space;
     }
 }
 

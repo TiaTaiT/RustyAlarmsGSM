@@ -8,6 +8,7 @@ use crate::custom_strings::separate_chars_by_commas;
 use crate::gsm_time_converter::GsmTime;
 use crate::hardware::{ModemControl, ModemControlInterface, ModemRx, ModemTx, PowerState};
 use crate::phone_book::PhoneBook;
+use crate::runtime::{USB_RX_PIPE, USB_TX_PIPE};
 use crate::sim800_logic::{
     AlarmCallDecision, AlarmDedupState, UsbCommandState, decide_alarm_call, first_phonebook_number,
 };
@@ -15,13 +16,8 @@ use crate::sim800_parser::{
     ParsedUrc, classify_urc, line_indicates_call_connected, line_indicates_call_failed,
     parse_clts_query_line, parse_cpbr_number, parse_cclk_line, parse_dtmf_char,
 };
-
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
-use embassy_sync::pipe::Pipe;
-
-pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
-pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
 const HANDSHAKE_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_TIMEOUT_MS: u64 = 1000;
@@ -707,5 +703,15 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         }
     }
 
-    async fn execute_mcu_command(&mut self, _cmd: &str) {}
+    async fn execute_mcu_command(&mut self, cmd: &str) {
+        #[cfg(test)]
+        {
+            crate::runtime::execute_mcu_command(cmd).await;
+        }
+
+        #[cfg(not(test))]
+        {
+            crate::runtime::execute_mcu_command(cmd).await;
+        }
+    }
 }
