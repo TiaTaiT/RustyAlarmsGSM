@@ -1,7 +1,9 @@
 // /src/hardware/rtc_stm32.rs
 use embassy_stm32::pac::{PWR, RCC, RTC};
 
-use super::traits::{GsmTime, Rtc};
+use crate::gsm_time_converter::GsmTime;
+
+use super::traits::{Rtc};
 
 /// STM32 RTC implementation using LSI
 pub struct Stm32Rtc {

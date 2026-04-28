@@ -1,6 +1,8 @@
 // /src/hardware/traits.rs
 use embassy_stm32::gpio::Output;
 
+use crate::gsm_time_converter::GsmTime;
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum PowerState {
     On,
@@ -55,16 +57,6 @@ pub(crate) fn apply_state(pin: &mut Output<'static>, state: PowerState) {
         PowerState::On => pin.set_high(),
         PowerState::Off => pin.set_low(),
     }
-}
-
-#[derive(Debug, Clone, Copy, defmt::Format)]
-pub struct GsmTime {
-    pub year: u8,
-    pub month: u8,
-    pub day: u8,
-    pub hour: u8,
-    pub minute: u8,
-    pub second: u8,
 }
 
 /// Hardware-independent RTC interface

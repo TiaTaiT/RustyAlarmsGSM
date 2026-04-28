@@ -21,3 +21,20 @@ fn test_separate_chars_by_commas() {
     let overflow_result = separate_chars_by_commas("12", &mut small_buf);
     assert_eq!(overflow_result, None);
 }
+
+#[test]
+fn test_separate_chars_by_commas_returns_none_for_small_buffer() {
+    let mut output = [0u8; 4];
+
+    assert_eq!(separate_chars_by_commas("123", &mut output), None);
+}
+
+#[test]
+fn test_extract_after_and_before_delimiter_handle_presence_and_absence() {
+    let input = "prefix:value:suffix";
+
+    assert_eq!(extract_after_delimiter(input, ":"), Some("value:suffix"));
+    assert_eq!(extract_before_delimiter(input, ":"), Some("prefix"));
+    assert_eq!(extract_after_delimiter(input, "|"), None);
+    assert_eq!(extract_before_delimiter(input, "|"), None);
+}

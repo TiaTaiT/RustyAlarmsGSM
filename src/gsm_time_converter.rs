@@ -1,6 +1,14 @@
 use heapless::Vec;
 
-use crate::hardware::GsmTime;
+#[derive(Debug, Clone, Copy, defmt::Format, PartialEq)]
+pub struct GsmTime {
+    pub year: u8,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
 
 impl GsmTime {
     fn parse_u8(s: &[u8]) -> Option<u8> {

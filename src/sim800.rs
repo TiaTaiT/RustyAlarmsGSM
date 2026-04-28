@@ -7,7 +7,7 @@ use crate::constants::*;
 use crate::custom_strings::{
     extract_after_delimiter, extract_between_delimiters, separate_chars_by_commas,
 };
-use crate::hardware::GsmTime;
+use crate::gsm_time_converter::GsmTime;
 use crate::hardware::{ModemControl, ModemControlInterface, ModemRx, ModemTx, PowerState};
 use crate::phone_book::PhoneBook;
 
