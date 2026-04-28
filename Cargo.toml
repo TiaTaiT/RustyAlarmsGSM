@@ -2,10 +2,10 @@
 name = "embassy800c"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94.1"
+rust-version = "1.95.0"
 
 [package.metadata.probe-rs]
-minimum-version = "0.30.0"
+minimum-version = "0.31.0"
 
 [[bin]]
 name = "embassy800c"
