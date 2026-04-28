@@ -36,72 +36,74 @@ impl GsmTime {
     }
 
     pub fn parse_gsm_time(&self, date: &str) -> Option<GsmTime> {
-        // Create a buffer for the result
-        let mut result_buf = [0u8; 32];
-        let mut result_len = 0;
+        // Normalize the input: keep only digits, replace everything else with ','
+        let mut result_buf = [0u8; 64]; // larger buffer to be safe
+        let mut result_len = 0usize;
 
-        // Iterate through date and build normalized result
-        for byte in date.bytes() {
-            if result_len >= result_buf.len() - 1 {
+        for &byte in date.as_bytes() {
+            if result_len >= result_buf.len() {
                 break;
             }
-            
-            if byte >= b'0' && byte <= b'9' {
-                // Copy digit
+            if byte.is_ascii_digit() {
                 result_buf[result_len] = byte;
             } else {
-                // Insert comma for non-digit
                 result_buf[result_len] = b',';
             }
             result_len += 1;
         }
 
-        // Split by commas into heapless Vec
-        let mut parts: Vec<&[u8], 8> = Vec::new();
+        // Split by commas and collect non-empty parts
+        let mut parts: heapless::Vec<&[u8], 8> = heapless::Vec::new();
         let mut start = 0;
 
-        for (i, &byte) in result_buf[..result_len].iter().enumerate() {
-            if byte == b',' {
+        for i in 0..=result_len {
+            if i == result_len || result_buf[i] == b',' {
                 if start < i {
-                    let _ = parts.push(&result_buf[start..i]);
+                    let part = &result_buf[start..i];
+                    if !part.is_empty() {
+                        let _ = parts.push(part);
+                    }
                 }
                 start = i + 1;
             }
         }
 
-        // Add final part if exists
-        if start < result_len {
-            let _ = parts.push(&result_buf[start..result_len]);
-        }
-
-        // Filter out empty parts
-        let valid_parts: Vec<&[u8], 8> = parts.into_iter()
-            .filter(|part| !part.is_empty())
-            .collect();
-
-        // Need exactly 6 parts for GSM time
-        if valid_parts.len() != 6 {
+        // We need at least 6 numeric parts (year, month, day, hour, min, sec)
+        // Extra parts (e.g. timezone) are ignored
+        if parts.len() < 6 {
             return None;
         }
 
-        let year = if valid_parts[0].len() > 2 {
-            Self::parse_u16_to_u8_year(valid_parts[0])?
+        // Parse year: support 2-digit or 4-digit (take last 2 digits if 4)
+        let year = if parts[0].len() > 2 {
+            Self::parse_u16_to_u8_year(parts[0])?
         } else {
-            Self::parse_u8(valid_parts[0])?
+            Self::parse_u8(parts[0])?
         };
-        
-        let month = Self::parse_u8(valid_parts[1])?;
-        let day = Self::parse_u8(valid_parts[2])?;
-        let hour = Self::parse_u8(valid_parts[3])?;
-        let minute = Self::parse_u8(valid_parts[4])?;
-        let second = Self::parse_u8(valid_parts[5])?;
 
-        // Validate ranges
-        if month < 1 || month > 12 || day < 1 || day > 31 || 
-           hour > 23 || minute > 59 || second > 59 {
+        let month = Self::parse_u8(parts[1])?;
+        let day = Self::parse_u8(parts[2])?;
+        let hour = Self::parse_u8(parts[3])?;
+        let minute = Self::parse_u8(parts[4])?;
+        let second = Self::parse_u8(parts[5])?;
+
+        // Basic range validation (note: day > 31 is rejected here, but real calendar validation is stricter)
+        if !(1..=12).contains(&month)
+            || !(1..=31).contains(&day)
+            || hour > 23
+            || minute > 59
+            || second > 59
+        {
             return None;
         }
 
-        Some(GsmTime { year, month, day, hour, minute, second })
+        Some(GsmTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+        })
     }
 }
