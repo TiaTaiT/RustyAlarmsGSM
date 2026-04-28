@@ -17,7 +17,7 @@ fn test_format_gsm_time_produces_compact_timestamp() {
 }
 
 #[test]
-fn parse_gsm_time_accepts_mixed_delimiters_and_long_years() {
+fn test_parse_gsm_time_accepts_mixed_delimiters_and_long_years() {
     let parsed = GsmTime {
         year: 0,
         month: 0,
@@ -35,7 +35,7 @@ fn parse_gsm_time_accepts_mixed_delimiters_and_long_years() {
 }
 
 #[test]
-fn parse_gsm_time_rejects_invalid_or_incomplete_input() {
+fn test_parse_gsm_time_rejects_invalid_or_incomplete_input() {
     let parser = GsmTime {
         year: 0,
         month: 0,

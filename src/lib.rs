@@ -8,6 +8,7 @@ pub mod alarms_handler;
 pub mod date_converter;
 pub mod gsm_time_converter;
 pub mod phone_book;
+pub mod alarms;
 
 // 2. Attach our test folder here instead!
 #[cfg(test)]

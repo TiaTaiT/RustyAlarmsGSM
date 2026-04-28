@@ -41,7 +41,7 @@ fn test_alarm_stack_overwrites_oldest_entry_when_full() {
 }
 
 #[test]
-fn alarm_stack_import_restores_exported_bits() {
+fn test_alarm_stack_import_restores_exported_bits() {
     let mut stack = AlarmStack::new();
     let bits = ['7', '0', '3', '5'];
 
