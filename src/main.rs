@@ -15,27 +15,35 @@ use embassy_time::{Duration, Instant, Timer};
 use heapless::String;
 
 mod alarms_handler;
+mod app_logic;
 mod constants;
 mod custom_strings;
 mod date_converter;
 mod gsm_time_converter;
 mod hardware;
+mod mcu_commands;
 mod phone_book;
 mod sim800;
+mod sim800_logic;
+mod sim800_parser;
+mod visualization;
 
 #[cfg(test)]
 mod tests;
 
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
+use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, handle_event, handle_sender_tick};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
 use crate::hardware::{Hardware, LedInterface, PowerState, RtcControl, StatusLeds, SystemSensors};
 #[cfg(feature = "receiver")]
 use crate::hardware::RelayInterface;
+use crate::mcu_commands::{SystemSnapshot, format_mcu_reply};
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 use crate::hardware::Rtc;
 use static_cell::StaticCell;
+use crate::visualization::{VisualizationState, build_visualization_frames};
 
 // --- Global Signals/Channels ---
 static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new();
@@ -46,11 +54,7 @@ pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
 pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
 struct SystemState {
-    alarm_stack: AlarmStack,
-    alive_countdown: i32,
-    pending_dtmf: Option<String<DTMF_PACKET_LENGTH>>,
-    retry_countdown: Option<u32>,
-    pending_alive_message: bool,
+    logic: LogicState,
     battery_level: u16,
     tamper_detected: bool,
     adc_values: [u16; 3],
@@ -59,11 +63,7 @@ struct SystemState {
 }
 
 static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState {
-    alarm_stack: AlarmStack::new(),
-    alive_countdown: 0,
-    pending_dtmf: None,
-    retry_countdown: None,
-    pending_alive_message: false,
+    logic: LogicState::new(),
     battery_level: 0,
     tamper_detected: false,
     adc_values: [0; 3],
@@ -232,7 +232,7 @@ async fn monitor_task(mut sensors: SystemSensors) {
         #[cfg(feature = "transmitter")]
         {
             let mut state = STATE.lock().await;
-            state.alarm_stack.push(&bools);
+            state.logic.alarm_stack.push(&bools);
         }
 
         let battery = sensors.read_battery_voltage().await;
@@ -331,153 +331,47 @@ async fn run_logic(
         let event_fut = EVENT_CHANNEL.receive();
 
         match select3(event_fut, sender_fut, watchdog_fut).await {
-            // --- CASE 1: EVENTS (Both) ---
-            Either3::First(event) => match event {
-                SimEvent::SmsReceived { message, .. } => {
-                    if let Some(alarm_str) = custom_strings::extract_before_delimiter(&message, ";")
-                    {
-                        if alarm_str.len() == ALARMS_MESSAGE_STRING_LENGTH {
-                            #[cfg(feature = "transmitter")]
-                            visualize_leds(&mut leds, alarm_str).await;
+            Either3::First(event) => {
+                let actions = {
+                    let mut state = STATE.lock().await;
+                    handle_event(&mut state.logic, &mut dtmf_buffer, map_sim_event(event))
+                };
+                apply_logic_actions(
+                    &actions,
+                    &mut leds,
+                    #[cfg(feature = "receiver")]
+                    relays,
+                    rtc,
+                    &mut watchdog_deadline,
+                )
+                .await;
+            }
 
-                            #[cfg(feature = "receiver")]
-                            visualize_relays(relays, &mut leds, alarm_str).await;
-
-                            watchdog_deadline =
-                                Some(Instant::now() + Duration::from_secs(255 * 60));
-                        }
-                    }
-                }
-                SimEvent::DtmfReceived(c) => {
-                    if dtmf_buffer.push(c).is_ok() {
-                        if dtmf_buffer.len() == DTMF_PACKET_LENGTH {
-                            #[cfg(feature = "transmitter")]
-                            visualize_leds(&mut leds, &dtmf_buffer).await;
-
-                            #[cfg(feature = "receiver")]
-                            visualize_relays(relays, &mut leds, &dtmf_buffer).await;
-
-                            watchdog_deadline =
-                                Some(Instant::now() + Duration::from_secs(255 * 60));
-                            dtmf_buffer.clear();
-                        }
-                    }
-                }
-                SimEvent::CallEnded => {
-                    dtmf_buffer.clear();
-                }
-                SimEvent::CallReceived { number } => {
-                    CMD_CHANNEL
-                        .send(Command::HandleIncomingCall {
-                            phone_number: number,
-                        })
-                        .await;
-                }
-                SimEvent::CallExecuted(success) => {
-                    if success {
-                        let mut state = STATE.lock().await;
-                        state.alarm_stack.acknowledge_export();
-                        state.pending_dtmf = None;
-                        state.retry_countdown = None;
-                        state.pending_alive_message = false;
-
-                        leds.set_alarm3(PowerState::On);
-                        Timer::after(Duration::from_secs(1)).await;
-                        leds.set_alarm3(PowerState::Off);
-                    } else {
-                        let mut state = STATE.lock().await;
-                        if state.pending_dtmf.is_some() {
-                            state.retry_countdown = Some(CALLBACK_PERIOD_MINUTES);
-                        }
-                    }
-                }
-                SimEvent::TimeReceived(time) => {
-                    let mut rtc = rtc.lock().await;
-                    rtc.set_time(time);
-                }
-            },
-
-            // --- CASE 2: SENDER LOGIC TICK ---
             Either3::Second(_) => {
                 next_sender_tick += Duration::from_secs(60);
 
                 #[cfg(feature = "transmitter")]
                 {
-                    let mut pending_dtmf: Option<String<DTMF_PACKET_LENGTH>> = None;
-                    let mut pending_sms: Option<String<SIM800_LINE_BUFFER_SIZE>> = None;
-                    let mut is_sms = false;
-
-                    {
+                    let current_time = {
+                        let rtc = rtc.lock().await;
+                        rtc.get_time()
+                    };
+                    let actions = {
                         let mut state = STATE.lock().await;
-                        let tick = state.alive_countdown <= 0;
-
-                        if let Some(countdown) = state.retry_countdown.as_mut() {
-                            if *countdown > 0 {
-                                *countdown -= 1;
-                            }
-                        }
-
-                        let should_retry = matches!(state.retry_countdown, Some(0));
-                        let should_send_new = state.pending_dtmf.is_none()
-                            && !state.pending_alive_message
-                            && (state.alarm_stack.has_changes() || tick);
-
-                        if should_retry {
-                            pending_dtmf = state.pending_dtmf.clone();
-                            if pending_dtmf.is_some() {
-                                state.retry_countdown = Some(CALLBACK_PERIOD_MINUTES);
-                            } else {
-                                state.retry_countdown = None;
-                            }
-                        } else if should_send_new {
-                            let bits = state.alarm_stack.export_bits();
-                            let str_stack: String<DTMF_PACKET_LENGTH> = bits.iter().collect();
-                            state.alive_countdown = ALIVE_PERIOD_MINUTES + 1;
-
-                            if use_sms {
-                                let time_buf = {
-                                    let rtc = rtc.lock().await;
-                                    let t = rtc.get_time();
-                                    crate::date_converter::format_gsm_time(&t)
-                                };
-                                let mut msg = String::<SIM800_LINE_BUFFER_SIZE>::new();
-                                use core::fmt::Write;
-                                let _ = write!(
-                                    msg,
-                                    "{}{}{}{}{}",
-                                    SMS_PREFIX,
-                                    SMS_DIVIDER,
-                                    str_stack,
-                                    SMS_DIVIDER,
-                                    time_buf.as_str()
-                                );
-                                pending_sms = Some(msg);
-                                is_sms = true;
-                            } else {
-                                state.pending_dtmf = Some(str_stack.clone());
-                                state.retry_countdown = None;
-                                state.pending_alive_message = tick;
-                                pending_dtmf = Some(str_stack);
-                            }
-                        }
-                        if !tick {
-                            state.alive_countdown -= 1;
-                        }
-                    }
-
-                    if is_sms {
-                        if let Some(msg) = pending_sms {
-                            CMD_CHANNEL
-                                .send(Command::SendAlarmSms { message: msg })
-                                .await;
-                        }
-                    } else if let Some(dtmf) = pending_dtmf {
-                        CMD_CHANNEL.send(Command::CallAlarmWithDtmf { dtmf }).await;
-                    }
+                        handle_sender_tick(&mut state.logic, use_sms, Some(&current_time))
+                    };
+                    apply_logic_actions(
+                        &actions,
+                        &mut leds,
+                        #[cfg(feature = "receiver")]
+                        relays,
+                        rtc,
+                        &mut watchdog_deadline,
+                    )
+                    .await;
                 }
             }
 
-            // --- CASE 3: WATCHDOG EXPIRED ---
             Either3::Third(_) => {
                 info!("Watchdog expired. Resetting outputs.");
                 leds.set_system(PowerState::Off);
@@ -502,28 +396,17 @@ where
     F: FnMut(usize, PowerState),
 {
     info!("Visualizing: {}", alarm_str);
+    let Some(frames) = build_visualization_frames(alarm_str) else {
+        return;
+    };
 
-    let mut alarm_chars = ['\0'; ALARMS_MESSAGE_STRING_LENGTH];
-    for (i, c) in alarm_str
-        .chars()
-        .take(ALARMS_MESSAGE_STRING_LENGTH)
-        .enumerate()
-    {
-        alarm_chars[i] = c;
-    }
-
-    let mut temp_stack = AlarmStack::new();
-    temp_stack.import_bits(alarm_chars);
-    let matrix = temp_stack.get_stack_view();
-
-    for row in matrix.iter() {
+    for row in frames.iter() {
         for (idx, &active) in row.iter().enumerate() {
             set_output(
                 idx,
-                if active {
-                    PowerState::On
-                } else {
-                    PowerState::Off
+                match active {
+                    VisualizationState::On => PowerState::On,
+                    VisualizationState::Off => PowerState::Off,
                 },
             );
         }
@@ -543,57 +426,22 @@ async fn system_monitor_task() {
 }
 
 pub async fn execute_mcu_command(cmd: &str) {
-    let mut reply = String::<128>::new();
-    use core::fmt::Write;
+    let snapshot = {
+        let state = STATE.lock().await;
+        SystemSnapshot {
+            battery_level: state.battery_level,
+            tamper_detected: state.tamper_detected,
+            power_connected: state.power_connected,
+            #[cfg(feature = "transmitter")]
+            adc_values: state.adc_values,
+            #[cfg(feature = "transmitter")]
+            current_alarms: state.current_alarms,
+            #[cfg(feature = "receiver")]
+            relay_bits: RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed),
+        }
+    };
 
-    let state = STATE.lock().await;
-
-    match cmd.trim_end() {
-#[cfg(feature = "transmitter")]
-        "_alarms" => {
-            let a = state.current_alarms;
-            let _ = write!(
-                reply,
-                "\r\nAlarms: {}{}{}{}\r\n",
-                a[0] as u8, a[1] as u8, a[2] as u8, a[3] as u8
-            );
-        }
-#[cfg(feature = "transmitter")]
-        "_adc" => {
-            let v = state.adc_values;
-            let _ = write!(
-                reply,
-                "\r\nADC: {}, {}, {}\r\n",
-                v[0], v[1], v[2]
-            );
-        }
-#[cfg(feature = "receiver")]
-        "_relays" => {
-            let bits = RELAY_STATES.load(core::sync::atomic::Ordering::Relaxed);
-            let _ = write!(
-                reply,
-                "\r\nRelays: {}{}{}{}\r\n",
-                bits & 1,
-                (bits >> 1) & 1,
-                (bits >> 2) & 1,
-                (bits >> 3) & 1
-            );
-        }
-        "_battery" => {
-            let _ = write!(reply, "\r\nBattery: {} mV\r\n", state.battery_level);
-        }
-        "_power" => {
-            let p = if state.power_connected { "Connected" } else { "Disconnected" };
-            let _ = write!(reply, "\r\nPower: {}\r\n", p);
-        }
-        "_tamper" => {
-            let t = if state.tamper_detected { "Open" } else { "Closed" };
-            let _ = write!(reply, "\r\nTamper: {}\r\n", t);
-        }
-        _ => {
-            let _ = write!(reply, "\r\nUnknown MCU command: {}\r\n", cmd);
-        }
-    }
+    let reply = format_mcu_reply(&snapshot, cmd);
 
     let bytes = reply.as_bytes();
     let mut offset = 0;
@@ -601,5 +449,61 @@ pub async fn execute_mcu_command(cmd: &str) {
         let space = core::cmp::min(bytes.len() - offset, 64);
         let _ = USB_TX_PIPE.write(&bytes[offset..offset + space]).await;
         offset += space;
+    }
+}
+
+async fn apply_logic_actions(
+    actions: &[LogicAction],
+    leds: &mut impl LedInterface,
+    #[cfg(feature = "receiver")]
+    relays: &mut impl RelayInterface,
+    rtc: &'static Mutex<CriticalSectionRawMutex, RtcControl>,
+    watchdog_deadline: &mut Option<Instant>,
+) {
+    for action in actions {
+        match action {
+            LogicAction::Visualize(alarm_str) => {
+                #[cfg(feature = "transmitter")]
+                visualize_leds(leds, alarm_str).await;
+
+                #[cfg(feature = "receiver")]
+                visualize_relays(relays, leds, alarm_str).await;
+            }
+            LogicAction::SendCommand(cmd) => {
+                CMD_CHANNEL.send(map_logic_command(cmd.clone())).await;
+            }
+            LogicAction::BlinkAlarm3 => {
+                leds.set_alarm3(PowerState::On);
+                Timer::after(Duration::from_secs(1)).await;
+                leds.set_alarm3(PowerState::Off);
+            }
+            LogicAction::UpdateRtc(time) => {
+                let mut rtc = rtc.lock().await;
+                rtc.set_time(*time);
+            }
+            LogicAction::SetWatchdog(timeout) => {
+                *watchdog_deadline = timeout
+                    .map(|secs| Instant::now() + Duration::from_secs(secs));
+            }
+        }
+    }
+}
+
+fn map_sim_event(event: SimEvent) -> LogicEvent {
+    match event {
+        SimEvent::SmsReceived { number, message } => LogicEvent::SmsReceived { number, message },
+        SimEvent::CallReceived { number } => LogicEvent::CallReceived { number },
+        SimEvent::DtmfReceived(c) => LogicEvent::DtmfReceived(c),
+        SimEvent::CallEnded => LogicEvent::CallEnded,
+        SimEvent::CallExecuted(success) => LogicEvent::CallExecuted(success),
+        SimEvent::TimeReceived(time) => LogicEvent::TimeReceived(time),
+    }
+}
+
+fn map_logic_command(command: LogicCommand) -> Command {
+    match command {
+        LogicCommand::HandleIncomingCall { phone_number } => Command::HandleIncomingCall { phone_number },
+        LogicCommand::SendAlarmSms { message } => Command::SendAlarmSms { message },
+        LogicCommand::CallAlarmWithDtmf { dtmf } => Command::CallAlarmWithDtmf { dtmf },
     }
 }

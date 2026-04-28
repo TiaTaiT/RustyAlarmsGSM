@@ -4,24 +4,31 @@ use embassy_time::{Duration, Timer, with_timeout};
 use heapless::String;
 
 use crate::constants::*;
-use crate::custom_strings::{
-    extract_after_delimiter, extract_between_delimiters, separate_chars_by_commas,
-};
+use crate::custom_strings::separate_chars_by_commas;
 use crate::gsm_time_converter::GsmTime;
 use crate::hardware::{ModemControl, ModemControlInterface, ModemRx, ModemTx, PowerState};
 use crate::phone_book::PhoneBook;
+use crate::sim800_logic::{
+    AlarmCallDecision, AlarmDedupState, UsbCommandState, decide_alarm_call, first_phonebook_number,
+};
+use crate::sim800_parser::{
+    ParsedUrc, classify_urc, line_indicates_call_connected, line_indicates_call_failed,
+    parse_clts_query_line, parse_cpbr_number, parse_cclk_line, parse_dtmf_char,
+};
 
-use crate::USB_RX_PIPE;
-use crate::USB_TX_PIPE;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
+use embassy_sync::pipe::Pipe;
+
+pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
+pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
 const HANDSHAKE_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_TIMEOUT_MS: u64 = 1000;
 const HANDSHAKE_ATTEMPTS: usize = 5;
 
 // Types for communication
-#[derive(Clone, defmt::Format, PartialEq)]
+#[derive(Clone, defmt::Format, PartialEq, Debug)]
 pub enum Command {
     Init,
     UsbConnected,
@@ -68,10 +75,8 @@ pub struct Sim800Driver<C = ModemControl> {
     control: C,
     phone_book: PhoneBook,
     line_buf: [u8; 128],
-    last_alarm_dtmf: String<DTMF_PACKET_LENGTH>,
-    last_alarm_time: u64,
-    usb_cmd_mode: bool,
-    usb_cmd_buf: String<64>,
+    alarm_dedup: AlarmDedupState,
+    usb_cmd: UsbCommandState,
     usb_connected: bool,
     is_powered: bool,
 }
@@ -84,10 +89,8 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             control,
             phone_book: PhoneBook::new(),
             line_buf: [0u8; 128],
-            last_alarm_dtmf: String::new(),
-            last_alarm_time: 0,
-            usb_cmd_mode: false,
-            usb_cmd_buf: String::new(),
+            alarm_dedup: AlarmDedupState::new(),
+            usb_cmd: UsbCommandState::new(),
             usb_connected: false,
             is_powered: false,
         }
@@ -156,13 +159,8 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                         return Err(());
                     }
 
-                    if line.contains("+CPBR:") {
-                        if let Some(num) = extract_between_delimiters(line, ",\"", "\",") {
-                            let mut s = String::<MAX_PHONE_LENGTH>::new();
-                            if s.push_str(num).is_ok() {
-                                cpbr_data = Some(s);
-                            }
-                        }
+                    if let Some(num) = parse_cpbr_number(line) {
+                        cpbr_data = Some(num);
                     }
                 }
 
@@ -194,7 +192,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                 }
 
                 if line.contains("+CCLK:") {
-                    found_time = Self::parse_cclk(line);
+                    found_time = parse_cclk_line(line);
                 }
             }
         })
@@ -223,12 +221,8 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                 }
 
                 // Response format: +CLTS: <mode>
-                if line.contains("+CLTS:") {
-                    if line.contains("1") {
-                        is_enabled = Some(true);
-                    } else {
-                        is_enabled = Some(false);
-                    }
+                if let Some(enabled) = parse_clts_query_line(line) {
+                    is_enabled = Some(enabled);
                 }
             }
         })
@@ -423,17 +417,14 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             loop {
                 let line = self.read_line().await?;
                 info!("Call setup line: {}", line);
-                if line.contains(ONLINE_SIGNAL) {
+                if line_indicates_call_connected(
+                    line,
+                    ONLINE_SIGNAL.chars().next().unwrap_or('\0'),
+                ) {
                     return Ok::<(), ()>(());
                 }
-                if line.contains("NO CARRIER") || line.contains("BUSY") {
+                if line_indicates_call_failed(line) {
                     return Err(());
-                }
-                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
-                    let c = val.trim().chars().next().unwrap_or('\0');
-                    if c == ONLINE_SIGNAL.chars().next().unwrap_or('\0') {
-                        return Ok::<(), ()>(());
-                    }
                 }
             }
         })
@@ -459,17 +450,13 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             loop {
                 let line = self.read_line().await?;
                 info!("Received during confirmation wait: {}", line);
-                if line.contains("NO CARRIER") || line.contains("BUSY") {
+                if line_indicates_call_failed(line) {
                     return Err(());
                 }
-                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
-                    let c = val.trim().chars().next().unwrap_or('\0');
-                    if c == CONFIRMATION_SIGNAL.chars().next().unwrap_or('\0') {
-                        self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
-                        return Ok::<(), ()>(());
-                    }
-                }
-                if line.contains(CONFIRMATION_SIGNAL) {
+                if line_indicates_call_connected(
+                    line,
+                    CONFIRMATION_SIGNAL.chars().next().unwrap_or('\0'),
+                ) {
                     self.send_cmd_wait_ok("AT+CHUP", DEFAULT_TIMEOUT_MS).await.ok();
                     return Ok::<(), ()>(());
                 }
@@ -506,12 +493,9 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             loop {
                 let line = self.read_line().await?;
                 info!("Incoming call flow line: {}", line);
-                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
-                    let c = val.trim().chars().next().unwrap_or('\0');
-                    if c != '\0' {
-                        dtmf_buf.push(c).ok();
-                        event_channel.send(SimEvent::DtmfReceived(c)).await;
-                    }
+                if let Some(c) = parse_dtmf_char(line) {
+                    dtmf_buf.push(c).ok();
+                    event_channel.send(SimEvent::DtmfReceived(c)).await;
                 }
                 if dtmf_buf.len() >= DTMF_PACKET_LENGTH {
                     return Ok::<(), ()>(());
@@ -533,33 +517,6 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         //self.send_cmd_wait_ok("AT+CHUP", 1000).await.ok();
 
         event_channel.send(SimEvent::CallEnded).await;
-    }
-
-    fn parse_cclk(line: &str) -> Option<GsmTime> {
-        // Example: +CCLK: "26/01/09,23:15:31+12"
-        let content = extract_between_delimiters(line, "\"", "\"")?;
-        let bytes = content.as_bytes();
-        if bytes.len() < 17 {
-            return None;
-        }
-
-        let parse2 = |i: usize| -> Option<u8> {
-            let d1 = bytes[i].wrapping_sub(b'0');
-            let d2 = bytes[i + 1].wrapping_sub(b'0');
-            if d1 > 9 || d2 > 9 {
-                return None;
-            }
-            Some(d1 * 10 + d2)
-        };
-
-        Some(GsmTime {
-            year: parse2(0)?,
-            month: parse2(3)?,
-            day: parse2(6)?,
-            hour: parse2(9)?,
-            minute: parse2(12)?,
-            second: parse2(15)?,
-        })
     }
 
     pub async fn run(
@@ -590,28 +547,20 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                         if !line.trim().is_empty() {
                             info!("RX: {}", line);
 
-                            if line.contains("+CMT:") {
-                                if let Some(num) = extract_between_delimiters(line, "\"", "\"") {
-                                    let mut s = String::new();
-                                    if s.push_str(num).is_ok() {
-                                        sms_sender = Some(s);
+                            if let Some(urc) = classify_urc(line) {
+                                match urc {
+                                    ParsedUrc::SmsHeader { number } => {
+                                        sms_sender = Some(number);
                                     }
-                                }
-                            } else if line.contains("+CLIP:") {
-                                if let Some(num) = extract_between_delimiters(line, "\"", "\"") {
-                                    let mut s_num = String::new();
-                                    s_num.push_str(num).ok();
-                                    event_channel
-                                        .send(SimEvent::CallReceived { number: s_num })
-                                        .await;
-                                }
-                            } else if line.contains("+DTMF:") {
-                                if let Some(val) = extract_after_delimiter(line, "+DTMF: ") {
-                                    let c = val.trim().chars().next().unwrap_or(' ');
-                                    event_channel.send(SimEvent::DtmfReceived(c)).await;
-                                }
-                            } else if line.contains("+CCLK:") {
-                                if let Some(time) = Self::parse_cclk(line) {
+                                    ParsedUrc::Clip { number } => {
+                                        event_channel
+                                            .send(SimEvent::CallReceived { number })
+                                            .await;
+                                    }
+                                    ParsedUrc::Dtmf(c) => {
+                                        event_channel.send(SimEvent::DtmfReceived(c)).await;
+                                    }
+                                    ParsedUrc::Time(time) => {
                                     info!(
                                         "Time received (URC): {}-{}-{} {}:{}:{}",
                                         time.year,
@@ -622,6 +571,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                                         time.second
                                     );
                                     event_channel.send(SimEvent::TimeReceived(time)).await;
+                                }
                                 }
                             }
                         }
@@ -650,8 +600,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                         }
                         Command::UsbDisconnected => {
                             self.usb_connected = false;
-                            self.usb_cmd_mode = false;
-                            self.usb_cmd_buf.clear();
+                            self.usb_cmd.reset();
 
                             #[cfg(feature = "receiver")]
                             self.power_on().await;
@@ -667,44 +616,33 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                             self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::SendAlarmSms { message } => {
-                            let mut target_num = String::<MAX_PHONE_LENGTH>::new();
-                            let mut found = false;
-                            if let Some(num) = self.phone_book.get_first() {
-                                target_num.push_str(num).ok();
-                                found = true;
-                            }
-                            if found {
+                            if let Some(target_num) = first_phonebook_number(&self.phone_book) {
                                 let _ = self.send_sms(&target_num, &message).await;
                             }
                             self.restore_usb_modem_mode_if_needed().await;
                         }
                         Command::CallAlarmWithDtmf { dtmf } => {
-                            let mut target_num = String::<MAX_PHONE_LENGTH>::new();
-                            let mut found = false;
-                            if let Some(num) = self.phone_book.get_first() {
-                                target_num.push_str(num).ok();
-                                found = true;
-                            }
-
-                            if found {
-                                let is_duplicate = (dtmf == self.last_alarm_dtmf)
-                                    && (uptime_sec.saturating_sub(self.last_alarm_time) < 120);
-
-                                if is_duplicate {
+                            match decide_alarm_call(
+                                &self.phone_book,
+                                &self.alarm_dedup,
+                                &dtmf,
+                                uptime_sec,
+                            ) {
+                                AlarmCallDecision::SkipDuplicate => {
                                     warn!(
                                         "Skipping duplicate alarm call for DTMF {} (Last: {}s ago)",
                                         dtmf,
-                                        uptime_sec - self.last_alarm_time
+                                        uptime_sec - self.alarm_dedup.last_time
                                     );
                                     event_channel.send(SimEvent::CallExecuted(true)).await;
                                     self.restore_usb_modem_mode_if_needed().await;
-                                } else {
-                                    info!("Calling Alarm: {} with DTMF: {}", target_num, dtmf);
-                                    match self.make_call_dtmf(&target_num, &dtmf).await {
+                                }
+                                AlarmCallDecision::PlaceCall { number } => {
+                                    info!("Calling Alarm: {} with DTMF: {}", number, dtmf);
+                                    match self.make_call_dtmf(&number, &dtmf).await {
                                         Ok(_) => {
                                             info!("Alarm confirmed (#).");
-                                            self.last_alarm_dtmf = dtmf.clone();
-                                            self.last_alarm_time = uptime_sec;
+                                            self.alarm_dedup.record_success(&dtmf, uptime_sec);
                                             event_channel.send(SimEvent::CallExecuted(true)).await;
                                         }
                                         Err(_) => {
@@ -714,9 +652,10 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                                     }
                                     self.restore_usb_modem_mode_if_needed().await;
                                 }
-                            } else {
+                                AlarmCallDecision::NoNumber => {
                                 warn!("No phone number for alarm call!");
                                 event_channel.send(SimEvent::CallExecuted(false)).await;
+                                }
                             }
                         }
                         Command::CallWithDtmf { phone_number, dtmf } => {
@@ -750,34 +689,16 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                     if n > 0 {
                         for i in 0..n {
                             let b = usb_rx_buf[i];
-                            let c = b as char;
+                            let outcome = self.usb_cmd.push_byte(b, self.is_powered);
 
-                            if !self.usb_cmd_mode && c == '_' {
-                                self.usb_cmd_mode = true;
-                                self.usb_cmd_buf.clear();
-                                self.usb_cmd_buf.push('_').ok();
+                            if outcome.echo {
                                 let _ = USB_TX_PIPE.try_write(&[b]);
-                            } else if self.usb_cmd_mode {
-                                let _ = USB_TX_PIPE.try_write(&[b]);
-                                if c == '\r' || c == '\n' {
-                                    if !self.usb_cmd_buf.is_empty() {
-                                        crate::execute_mcu_command(self.usb_cmd_buf.as_str()).await;
-                                        self.usb_cmd_buf.clear();
-                                    }
-                                    self.usb_cmd_mode = false;
-                                } else if c == '\x08' || c == '\x7f' {
-                                    self.usb_cmd_buf.pop();
-                                } else if self.usb_cmd_buf.len() < self.usb_cmd_buf.capacity() {
-                                    self.usb_cmd_buf.push(c).ok();
-                                }
-                            } else {
-                                // Forward MAUI command to modem only when the modem is active.
-                                // USB itself must remain responsive even while the SIM800C is off.
-                                if self.is_powered {
-                                    let _ = self.tx.write(&[b]).await;
-                                }
-                                // Echo it to the TX pipe so MAUI sees what it sent
-                                let _ = USB_TX_PIPE.try_write(&[b]);
+                            }
+                            if outcome.forward_to_modem {
+                                let _ = self.tx.write(&[b]).await;
+                            }
+                            if let Some(cmd) = outcome.command_to_execute {
+                                self.execute_mcu_command(cmd.as_str()).await;
                             }
                         }
                     }
@@ -785,4 +706,6 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             }
         }
     }
+
+    async fn execute_mcu_command(&mut self, _cmd: &str) {}
 }

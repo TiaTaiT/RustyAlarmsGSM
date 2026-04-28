@@ -3,7 +3,7 @@ use embassy_stm32::gpio::Output;
 
 use crate::gsm_time_converter::GsmTime;
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum PowerState {
     On,
     Off,

@@ -14,6 +14,7 @@ pub trait AlarmTracker {
     fn acknowledge_export(&mut self);
 }
 
+#[derive(Clone)]
 pub struct AlarmStack {
     stack: [[bool; ALARMS_CHANNELS_AMOUNT]; ALARMS_STACK_DEPTH],
     counter: usize,
