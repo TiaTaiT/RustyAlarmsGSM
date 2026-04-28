@@ -1,6 +1,6 @@
 // /src/phone_book.rs
+
 use heapless::String;
-use defmt::info;
 
 use crate::constants::MAX_PHONE_LENGTH;
 
@@ -20,7 +20,6 @@ impl PhoneBook {
     }
 
     pub fn add_number(&mut self, number: &str) -> Result<(), &'static str> {
-        info!("Trying to add number {}", number);
         if self.count >= MAX_PHONE_COUNT {
             return Err("Phone book full");
         }
