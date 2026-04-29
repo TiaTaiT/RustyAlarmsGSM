@@ -1,3 +1,4 @@
+// /src/sim800_parser.rs
 use heapless::String;
 
 use crate::constants::MAX_PHONE_LENGTH;
@@ -78,11 +79,16 @@ pub fn parse_clts_query_line(line: &str) -> Option<bool> {
 }
 
 pub fn line_indicates_call_connected(line: &str, online_signal: char) -> bool {
-    line.contains(online_signal) || parse_dtmf_char(line) == Some(online_signal)
+    // Rely solely on DTMF parsing so random URCs like *PSUTTZ don't trigger false positives
+    parse_dtmf_char(line) == Some(online_signal)
 }
 
 pub fn line_indicates_call_failed(line: &str) -> bool {
-    line.contains("NO CARRIER") || line.contains("BUSY")
+    line.contains("NO CARRIER") || 
+    line.contains("BUSY") ||
+    line.contains("NO DIALTONE") ||
+    line.contains("NO ANSWER") ||
+    line.trim() == "ERROR"
 }
 
 pub fn classify_urc(line: &str) -> Option<ParsedUrc> {
