@@ -1,4 +1,5 @@
 // /src/hardware/traits.rs
+#![allow(async_fn_in_trait)]
 use embassy_stm32::gpio::Output;
 
 use crate::gsm_time_converter::GsmTime;
