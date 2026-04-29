@@ -22,6 +22,7 @@ use embassy_sync::channel::{Receiver, Sender};
 const HANDSHAKE_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_TIMEOUT_MS: u64 = 1000;
 const HANDSHAKE_ATTEMPTS: usize = 6;
+const DMA_CHUNK_SIZE: usize = 256; // DMA Chunk buffer to prevent overrun errors
 
 #[derive(Clone, defmt::Format, PartialEq, Debug)]
 pub enum SimError {
@@ -78,9 +79,9 @@ pub struct Sim800Driver<C = ModemControl> {
     rx: ModemRx,
     control: C,
     phone_book: PhoneBook,
-    line_buf:[u8; 128],
+    line_buf:[u8; SIM800_LINE_BUFFER_SIZE],
     line_pos: usize,
-    rx_buf:[u8; 256], // DMA Chunk buffer to prevent overrun errors
+    rx_buf:[u8; DMA_CHUNK_SIZE], // DMA Chunk buffer to prevent overrun errors
     rx_buf_pos: usize,
     rx_buf_len: usize,
     alarm_dedup: AlarmDedupState,
@@ -97,9 +98,9 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
             rx,
             control,
             phone_book: PhoneBook::new(),
-            line_buf:[0u8; 128],
+            line_buf:[0u8; SIM800_LINE_BUFFER_SIZE],
             line_pos: 0,
-            rx_buf:[0u8; 256],
+            rx_buf:[0u8; DMA_CHUNK_SIZE],
             rx_buf_pos: 0,
             rx_buf_len: 0,
             alarm_dedup: AlarmDedupState::new(),
@@ -136,7 +137,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         }
     }
 
-    async fn read_line(&mut self) -> Result<String<128>, SimError> {
+    async fn read_line(&mut self) -> Result<String<SIM800_LINE_BUFFER_SIZE>, SimError> {
         loop {
             let b = self.read_byte().await?;
 
@@ -146,12 +147,12 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
                     len -= 1;
                 }
                 
-                let mut s = String::<128>::new();
+                let mut s = String::<SIM800_LINE_BUFFER_SIZE>::new();
                 if let Ok(valid_str) = core::str::from_utf8(&self.line_buf[..len]) {
                     let _ = s.push_str(valid_str);
                     
                     if !s.trim().is_empty() {
-                        let mut debug_out = String::<128>::new();
+                        let mut debug_out = String::<SIM800_LINE_BUFFER_SIZE>::new();
                         let _ = core::fmt::write(&mut debug_out, format_args!("\r\n[SIM] {}", valid_str));
                         let mut offset = 0;
                         let bytes = debug_out.as_bytes();
@@ -174,7 +175,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         }
     }
 
-    async fn read_line_and_process_urcs(&mut self) -> Result<String<128>, SimError> {
+    async fn read_line_and_process_urcs(&mut self) -> Result<String<SIM800_LINE_BUFFER_SIZE>, SimError> {
         let s = self.read_line().await?;
         if let Some(urc) = classify_urc(&s) {
             self.process_urc(urc).await;
@@ -204,7 +205,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
 
         let clean_str = s.trim_end();
         if !clean_str.is_empty() {
-            let mut debug_out = String::<128>::new();
+            let mut debug_out = String::<SIM800_LINE_BUFFER_SIZE>::new();
             let _ = core::fmt::write(&mut debug_out, format_args!("\r\n[MCU] {}", clean_str));
             
             let mut offset = 0;

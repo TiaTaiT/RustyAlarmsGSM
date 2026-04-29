@@ -23,7 +23,7 @@ pub const DTMF_PACKET_LENGTH: usize = 4; // Matches channels
 
 pub const MAX_PHONE_LENGTH: usize = 16;
 
-pub const SIM800_LINE_BUFFER_SIZE: usize = 128;
+pub const SIM800_LINE_BUFFER_SIZE: usize = 64;
 pub const MAXIMUM_DTMF_BUFFER_SIZE: usize = 16;
 pub const MAXIMUM_SIM800_LINE_COUNT: usize = 8;
 pub const MAXIMUM_INCOMING_SMS_BUFFER_SIZE: usize = 8;
