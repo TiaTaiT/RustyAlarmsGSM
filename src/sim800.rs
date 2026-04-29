@@ -19,10 +19,12 @@ use crate::sim800_parser::{
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 
-const HANDSHAKE_TIMEOUT_MS: u64 = 2000;
+const HANDSHAKE_TIMEOUT_MS: u64 = 1000;
 const DEFAULT_TIMEOUT_MS: u64 = 1000;
 const HANDSHAKE_ATTEMPTS: usize = 6;
 const DMA_CHUNK_SIZE: usize = 256; // DMA Chunk buffer to prevent overrun errors
+const NETWORK_REGISTRATION_TIMEOUT_SECONDS: usize = 30;
+const PHONEBOOK_CAPACITY: usize = 8;
 
 #[derive(Clone, defmt::Format, PartialEq, Debug)]
 pub enum SimError {
@@ -276,20 +278,20 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         }
 
         // Spam ATE0 to shut off echo immediately and prevent UART Overruns!
-        for _ in 0..6 {
+        for _ in 0..HANDSHAKE_ATTEMPTS {
             self.send_str("ATE0\r\n").await;
             Timer::after(Duration::from_millis(200)).await;
-            if self.send_cmd_wait_ok("AT", 1000).await.is_ok() {
+            if self.send_cmd_wait_ok("AT", HANDSHAKE_TIMEOUT_MS).await.is_ok() {
                 break;
             }
         }
-        self.send_cmd_wait_ok("ATE0", 1000).await.ok(); 
+        self.send_cmd_wait_ok("ATE0", DEFAULT_TIMEOUT_MS).await.ok(); 
 
         info!("Waiting for Network Registration...");
-        for _ in 0..30 {
+        for _ in 0..NETWORK_REGISTRATION_TIMEOUT_SECONDS {
             self.send_str("AT+CREG?\r\n").await;
             let mut registered = false;
-            let _ = with_timeout(Duration::from_millis(1000), async {
+            let _ = with_timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS), async {
                 loop {
                     let line = self.read_line_and_process_urcs().await?;
                     if line.contains("+CREG: 0,1") || line.contains("+CREG: 0,5") || line.contains("+CREG: 1,1") || line.contains("+CREG: 1,5") {
@@ -336,11 +338,11 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
         }
 
         info!("Loading Phonebook...");
-        for i in 1..=8 {
+        for i in 1..=PHONEBOOK_CAPACITY {
             let mut buf = String::<16>::new();
             use core::fmt::Write;
             let _ = write!(buf, "AT+CPBR={}", i);
-            if let Err(e) = self.send_cmd_wait_ok(&buf, 1000).await {
+            if let Err(e) = self.send_cmd_wait_ok(&buf, DEFAULT_TIMEOUT_MS).await {
                 warn!("Failed to load phonebook index {}: {:?}", i, e);
             }
         }
@@ -417,7 +419,7 @@ impl<C: ModemControlInterface> Sim800Driver<C> {
     pub async fn send_sms(&mut self, number: &str, message: &str) -> Result<(), SimError> {
         self.ensure_powered().await;
         
-        let mut cmd = String::<64>::new();
+        let mut cmd = String::<SIM800_SMS_SIZE>::new();
         use core::fmt::Write;
         let _ = write!(cmd, "AT+CMGS=\"{}\"", number);
         self.send_str(&cmd).await;
