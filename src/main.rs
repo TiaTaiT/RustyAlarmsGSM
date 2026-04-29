@@ -31,7 +31,7 @@ mod visualization;
 #[cfg(test)]
 mod tests;
 
-use crate::alarms_handler::{AlarmStack, AlarmTracker};
+use crate::alarms_handler::{AlarmTracker};
 use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, handle_event, handle_sender_tick};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
