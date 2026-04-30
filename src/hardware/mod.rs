@@ -17,7 +17,7 @@ pub use rtc_stm32::Stm32Rtc as RtcControl;
 #[cfg(feature = "receiver")]
 pub use relays::AlarmRelays;
 pub use sensors::SystemSensors;
-pub use traits::{LedInterface, ModemControlInterface, PowerState, Rtc, SensorInterface};
+pub use traits::{LedInterface, ModemControlInterface, ModemRxInterface, ModemTxInterface, PowerState, Rtc, SensorInterface};
 #[cfg(feature = "receiver")]
 pub use traits::RelayInterface;
 #[cfg(feature = "transmitter")]

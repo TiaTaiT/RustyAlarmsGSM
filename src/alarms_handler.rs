@@ -1,4 +1,5 @@
 // /src/alarms_handler.rs
+#[cfg(not(test))]
 use defmt::debug;
 use crate::constants::{ALARMS_CHANNELS_AMOUNT, ALARMS_MESSAGE_STRING_LENGTH, ALARMS_STACK_DEPTH};
 
@@ -65,6 +66,7 @@ impl AlarmTracker for AlarmStack {
     }
     
     fn export_bits(&self) -> [char; ALARMS_MESSAGE_STRING_LENGTH] {
+        #[cfg(not(test))]
         debug!("Exporting alarm bits...");
         
         let mut result = ['0'; ALARMS_MESSAGE_STRING_LENGTH];

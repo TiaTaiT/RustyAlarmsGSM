@@ -1,5 +1,6 @@
 // /src/gsm_time_converter.rs
-#[derive(Debug, Clone, Copy, defmt::Format, PartialEq)]
+#[cfg_attr(not(test), derive(defmt::Format))]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GsmTime {
     pub year: u8,
     pub month: u8,

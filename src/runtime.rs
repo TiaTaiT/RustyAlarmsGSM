@@ -1,13 +1,21 @@
+#[cfg(not(test))]
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+#[cfg(not(test))]
 use embassy_sync::mutex::Mutex;
+#[cfg(not(test))]
 use embassy_sync::pipe::Pipe;
+#[cfg(not(test))]
 use heapless::String;
 
+#[cfg(not(test))]
 use crate::mcu_commands::{SystemSnapshot, format_mcu_reply};
 
+#[cfg(not(test))]
 pub static USB_RX_PIPE: Pipe<CriticalSectionRawMutex, 256> = Pipe::new();
+#[cfg(not(test))]
 pub static USB_TX_PIPE: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
 
+#[cfg(not(test))]
 pub struct RuntimeSnapshot {
     pub battery_level: u16,
     pub tamper_detected: bool,
@@ -20,6 +28,7 @@ pub struct RuntimeSnapshot {
     pub relay_bits: u8,
 }
 
+#[cfg(not(test))]
 pub static RUNTIME_SNAPSHOT: Mutex<CriticalSectionRawMutex, RuntimeSnapshot> = Mutex::new(RuntimeSnapshot {
     battery_level: 0,
     tamper_detected: false,

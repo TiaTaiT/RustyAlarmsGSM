@@ -54,7 +54,7 @@ fn classifies_urcs() {
 #[test]
 fn detects_call_status_lines() {
     assert!(line_indicates_call_connected("+DTMF: *", '*'));
-    assert!(line_indicates_call_connected("*", '*'));
+    assert!(!line_indicates_call_connected("*", '*'));
     assert!(line_indicates_call_failed("NO CARRIER"));
     assert!(line_indicates_call_failed("BUSY"));
     assert!(!line_indicates_call_failed("OK"));

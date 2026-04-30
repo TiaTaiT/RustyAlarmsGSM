@@ -32,6 +32,15 @@ pub trait ModemControlInterface {
     fn set_dc_power(&mut self, state: PowerState);
 }
 
+pub trait ModemTxInterface {
+    async fn write(&mut self, buf: &[u8]) -> Result<(), ()>;
+}
+
+pub trait ModemRxInterface {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()>;
+    async fn read_until_idle(&mut self, buf: &mut [u8]) -> Result<usize, ()>;
+}
+
 #[cfg(feature = "receiver")]
 pub trait RelayInterface {
     fn set(&mut self, index: usize, state: PowerState);
