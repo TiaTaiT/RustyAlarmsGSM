@@ -209,10 +209,10 @@ pub fn watchdog_timeout_seconds() -> u64 {
 
 pub const fn map_logical_to_physical_index(logical_idx: usize) -> usize {
     match logical_idx {
-        0 => 1, // Tamper data (idx 0) moves to the 4th output (mapped_idx 3)
-        1 => 2, // Alarm 1 data (idx 1) moves to the 1st output (mapped_idx 0)
-        2 => 3, // Alarm 2 data (idx 2) moves to the 2nd output (mapped_idx 1)
-        3 => 0, // Alarm 3 data (idx 3) moves to the 3rd output (mapped_idx 2)
+        0 => 1, // Alarm 1 (string char 0) maps to physical output 1
+        1 => 2, // Alarm 2 (string char 1) maps to physical output 2
+        2 => 3, // Alarm 3 (string char 2) maps to physical output 3
+        3 => 0, // Tamper (string char 3) maps to physical output 0 (Tamper)
         _ => logical_idx, // Fallback for out-of-bounds safety
     }
 }

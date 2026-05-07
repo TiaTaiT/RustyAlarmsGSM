@@ -130,16 +130,17 @@ fn local_alarms_changed_event_produces_update_action() {
 
 #[test]
 fn visualization_indices_map_to_correct_hardware_outputs() {
-    // Expected sequence: [Tamper, Alarm1, Alarm2, Alarm3] 
-    // Translates to:     [Relay4, Relay1, Relay2, Relay3]
+    // Received string sequence (Logical):  [Alarm1, Alarm2, Alarm3, Tamper]
+    // Hardware output sequence (Physical):[Tamper, Alarm1, Alarm2, Alarm3]
     
-    assert_eq!(map_logical_to_physical_index(0), 3, "Tamper should map to physical index 3 (4th output)");
-    assert_eq!(map_logical_to_physical_index(1), 0, "Alarm1 should map to physical index 0 (1st output)");
-    assert_eq!(map_logical_to_physical_index(2), 1, "Alarm2 should map to physical index 1 (2nd output)");
-    assert_eq!(map_logical_to_physical_index(3), 2, "Alarm3 should map to physical index 2 (3rd output)");
+    assert_eq!(map_logical_to_physical_index(0), 1, "Alarm1 (char 0) should route to output 1");
+    assert_eq!(map_logical_to_physical_index(1), 2, "Alarm2 (char 1) should route to output 2");
+    assert_eq!(map_logical_to_physical_index(2), 3, "Alarm3 (char 2) should route to output 3");
+    assert_eq!(map_logical_to_physical_index(3), 0, "Tamper (char 3) should route to output 0");
     
-    // Safety check for unexpected inputs
+    // Safety check for unexpected bounds
     assert_eq!(map_logical_to_physical_index(4), 4);
+    assert_eq!(map_logical_to_physical_index(99), 99);
 }
 
 trait LogicStateTestExt {
