@@ -94,6 +94,31 @@ fn sender_tick_retries_pending_dtmf_call() {
     ));
 }
 
+#[test]
+fn local_alarms_changed_event_produces_update_action() {
+    let mut state = LogicState::new();
+    let mut buffer = heapless::String::new();
+
+    // Define a dummy state for our alarms (e.g., Alarm 1 ON, Alarm 2 OFF, Alarm 3 ON, Tamper Closed)
+    let test_alarms = [true, false, true, true];
+
+    // Fire the new event
+    let actions = handle_event(
+        &mut state,
+        &mut buffer,
+        LogicEvent::LocalAlarmsChanged(test_alarms),
+    );
+
+    // Verify it yields exactly one action
+    assert_eq!(actions.len(), 1);
+
+    // Verify the action is UpdateLocalAlarms and contains the exact same boolean array
+    assert!(matches!(
+        &actions[0],
+        LogicAction::UpdateLocalAlarms(alarms) if alarms == &test_alarms
+    ));
+}
+
 trait LogicStateTestExt {
     fn logic_alarm_push(&mut self);
     fn logic_alarm_push_variant(&mut self);
