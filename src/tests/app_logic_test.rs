@@ -143,6 +143,46 @@ fn visualization_indices_map_to_correct_hardware_outputs() {
     assert_eq!(map_logical_to_physical_index(99), 99);
 }
 
+#[test]
+fn sender_tick_sms_mode_acknowledges_alarm_stack_to_prevent_infinite_retry() {
+    let mut state = LogicState::new();
+    
+    // 1. Trigger an alarm change
+    state.logic_alarm_push_variant();
+    assert!(state.alarm_stack.has_changes(), "Stack should have unacknowledged changes");
+
+    let time = GsmTime {
+        year: 26,
+        month: 5,
+        day: 7,
+        hour: 15,
+        minute: 30,
+        second: 51,
+    };
+
+    // 2. First tick should generate the SMS and acknowledge the stack
+    let actions = handle_sender_tick(&mut state, true, Some(&time));
+    
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(
+        &actions[0],
+        LogicAction::SendCommand(LogicCommand::SendAlarmSms { .. })
+    ));
+
+    // 3. Verify the fix: The stack must now be acknowledged!
+    assert!(
+        !state.alarm_stack.has_changes(), 
+        "Alarm stack was not acknowledged after queuing SMS!"
+    );
+
+    // 4. A subsequent tick should yield NO actions, proving the infinite retry loop is fixed
+    let next_actions = handle_sender_tick(&mut state, true, Some(&time));
+    assert!(
+        next_actions.is_empty(), 
+        "Expected no actions on subsequent tick, but got another SMS command!"
+    );
+}
+
 trait LogicStateTestExt {
     fn logic_alarm_push(&mut self);
     fn logic_alarm_push_variant(&mut self);

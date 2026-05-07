@@ -174,6 +174,9 @@ pub fn handle_sender_tick(
                 let _ = actions.push(LogicAction::SendCommand(LogicCommand::SendAlarmSms {
                     message: msg,
                 }));
+                
+                // [ FIX ] - Acknowledge the export so we don't infinitely retry!
+                state.alarm_stack.acknowledge_export();
             }
         } else {
             state.pending_dtmf = Some(payload.clone());
