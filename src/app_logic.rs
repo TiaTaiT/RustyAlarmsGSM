@@ -196,11 +196,24 @@ pub fn handle_sender_tick(
 }
 
 pub fn extract_alarm_payload(message: &str) -> Option<String<DTMF_PACKET_LENGTH>> {
-    let alarm_str = extract_before_delimiter(message, ";")?;
+    // Expected format: SMS_PREFIX + SMS_DIVIDER + PAYLOAD + SMS_DIVIDER + TIME
+    // Example: "PPP_0600_260507160700"
+    
+    let mut parts = message.split(SMS_DIVIDER);
+    
+    // 1. Validate Prefix
+    let prefix = parts.next()?;
+    if prefix != SMS_PREFIX {
+        return None;
+    }
+
+    // 2. Extract and Validate Payload Length
+    let alarm_str = parts.next()?;
     if alarm_str.len() != ALARMS_MESSAGE_STRING_LENGTH {
         return None;
     }
 
+    // 3. Return successfully
     let mut out = String::<DTMF_PACKET_LENGTH>::new();
     out.push_str(alarm_str).ok()?;
     Some(out)

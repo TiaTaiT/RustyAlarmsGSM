@@ -13,8 +13,26 @@ use crate::gsm_time_converter::GsmTime;
 
 #[test]
 fn extracts_alarm_payload_only_for_valid_messages() {
-    assert_eq!(extract_alarm_payload("1234;rest").as_deref(), Some("1234"));
-    assert_eq!(extract_alarm_payload("123;rest"), None);
+    use crate::constants::{SMS_PREFIX, SMS_DIVIDER};
+    use core::fmt::Write;
+    
+    // Build a valid message dynamically so the test passes regardless of actual constant values
+    let mut valid_msg = heapless::String::<64>::new();
+    let _ = write!(valid_msg, "{}{}{}{}260507160700", SMS_PREFIX, SMS_DIVIDER, "1234", SMS_DIVIDER);
+    assert_eq!(extract_alarm_payload(&valid_msg).as_deref(), Some("1234"));
+
+    // Test Invalid Length
+    let mut invalid_len = heapless::String::<64>::new();
+    let _ = write!(invalid_len, "{}{}{}{}260507160700", SMS_PREFIX, SMS_DIVIDER, "123", SMS_DIVIDER);
+    assert_eq!(extract_alarm_payload(&invalid_len), None);
+    
+    // Test Invalid Prefix
+    let mut invalid_prefix = heapless::String::<64>::new();
+    let _ = write!(invalid_prefix, "XXX{}{}{}260507160700", SMS_DIVIDER, "1234", SMS_DIVIDER);
+    assert_eq!(extract_alarm_payload(&invalid_prefix), None);
+
+    // Test Completely Malformed
+    assert_eq!(extract_alarm_payload("1234"), None); 
 }
 
 #[test]
