@@ -296,6 +296,7 @@ async fn logic_task(
 ) {
     alarms_ctrl.set_pullup(PowerState::On);
     let use_sms = alarms_ctrl.is_sms_enabled();
+    info!("Alarms pull-up enabled. SMS mode: {}", use_sms);
     run_logic(leds, rtc, use_sms).await;
 }
 

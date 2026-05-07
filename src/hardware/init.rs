@@ -59,7 +59,7 @@ pub fn init() -> Hardware {
 
     let alarms_ctrl = AlarmsControl {
         alarms_pullup: Output::new(p.PB1, Level::High, Speed::Low),
-        is_sms_option: Input::new(p.PB10, Pull::None),
+        is_sms_option: Input::new(p.PB7, Pull::None),
     };
 
     let modem_ctrl = ModemControl {
