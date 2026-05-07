@@ -7,7 +7,6 @@ pub const HIGH_INTRUSION_THRESHOLD: u16 = 3000;
 // Updated to 4 channels for the new board
 pub const ALARMS_CHANNELS_AMOUNT: usize = 4;
 pub const ALARMS_STACK_DEPTH: usize = 3;
-pub const ALARMS_BUFFER_SIZE: usize = 256;
 pub const ALARMS_MESSAGE_STRING_LENGTH: usize = 4; // Matches channels
 
 pub const INIT_SIM800_DELAY_SECONDS: u32 = 6;
@@ -18,19 +17,16 @@ pub const SMS_PREFIX: &str = "PPP";
 pub const SMS_DIVIDER: &str = "_";
 pub const ONLINE_SIGNAL: &str = "*";
 pub const CONFIRMATION_SIGNAL: &str = "#";
-pub const ERROR_SIGNAL: &str = "0";
+//pub const ERROR_SIGNAL: &str = "0";
 pub const DTMF_PACKET_LENGTH: usize = 4; // Matches channels
 
 pub const MAX_PHONE_LENGTH: usize = 16;
 
 pub const SIM800_LINE_BUFFER_SIZE: usize = 64;
 pub const SIM800_SMS_SIZE: usize = 64; // Must be less than SIM800_LINE_BUFFER_SIZE
-pub const MAXIMUM_DTMF_BUFFER_SIZE: usize = 16;
-pub const MAXIMUM_SIM800_LINE_COUNT: usize = 8;
-pub const MAXIMUM_INCOMING_SMS_BUFFER_SIZE: usize = 8;
 
-pub const SIM800_RX_BUFFER_SIZE: usize = 256;
 pub const BATTERY_VOLTAGE_FACTOR: f32 = 9.155;
+pub const RELAYS_FRAME_DURATION_SECONDS: u64 = 3; // Delay between relays states update
 
 pub const CALLBACK_PERIOD_MINUTES: u32 = 5;
 

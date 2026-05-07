@@ -451,7 +451,7 @@ where
                 },
             );
         }
-        Timer::after(Duration::from_secs(3)).await;
+        Timer::after(Duration::from_secs(RELAYS_FRAME_DURATION_SECONDS)).await;
     }
 }
 
