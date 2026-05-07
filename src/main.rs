@@ -50,6 +50,7 @@ static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new(
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SimEvent, 4> = Channel::new();
 static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
 static RTC_STATE: StaticCell<Mutex<CriticalSectionRawMutex, RtcControl>> = StaticCell::new();
+static ALARM_CHANNEL: Channel<CriticalSectionRawMutex, [bool; 4], 4> = Channel::new();
 
 struct SystemState {
     logic: LogicState,
@@ -211,49 +212,69 @@ async fn sim800_task(
 #[embassy_executor::task]
 async fn monitor_task(mut sensors: SystemSensors) {
     loop {
-        #[cfg(feature = "transmitter")]
-        let (values, bools) = {
-            let v = sensors.read_alarms().await;
-            let tamper_state = !sensors.is_housing_open();
-            let b = [
-                v[0] > LOW_INTRUSION_THRESHOLD && v[0] < HIGH_INTRUSION_THRESHOLD,
-                v[1] > LOW_INTRUSION_THRESHOLD && v[1] < HIGH_INTRUSION_THRESHOLD,
-                v[2] > LOW_INTRUSION_THRESHOLD && v[2] < HIGH_INTRUSION_THRESHOLD,
-                tamper_state,
-            ];
-            (v, b)
-        };
-
-        #[cfg(not(feature = "transmitter"))]
-        let (values, bools) = ([0u16; 3], [false; 4]);
-
-        #[cfg(feature = "transmitter")]
-        {
-            let mut state = STATE.lock().await;
-            state.logic.alarm_stack.push(&bools);
-        }
-
+        // 1. Read all standard sensors once
         let battery = sensors.read_battery_voltage().await;
         let tamper = sensors.is_housing_open();
         let power = sensors.is_power_connected();
 
+        // 2. Conditionally read and evaluate transmitter-specific alarms
+        #[cfg(feature = "transmitter")]
+        let (values, bools) = {
+            let v = sensors.read_alarms().await;
+            let b =[
+                v[0] > LOW_INTRUSION_THRESHOLD && v[0] < HIGH_INTRUSION_THRESHOLD,
+                v[1] > LOW_INTRUSION_THRESHOLD && v[1] < HIGH_INTRUSION_THRESHOLD,
+                v[2] > LOW_INTRUSION_THRESHOLD && v[2] < HIGH_INTRUSION_THRESHOLD,
+                !tamper, // Reuse the tamper reading from above
+            ];
+            (v, b)
+        };
+
+        // If not a transmitter, define default values so the rest of the code still compiles
+        #[cfg(not(feature = "transmitter"))]
+        let (values, bools) = ([0u16; 3], [false; 4]);
+
+        let mut alarms_changed = false;
+
+        // 3. Update the global STATE (using a SINGLE lock to improve performance)
         {
             let mut state = STATE.lock().await;
-            state.adc_values = values;
-            state.current_alarms = bools;
-            state.battery_level = battery;
+
+            // Log tamper warning if it just happened
             if tamper && !state.tamper_detected {
                 warn!("TAMPER DETECTED!");
             }
+
+            #[cfg(feature = "transmitter")]
+            {
+                state.logic.alarm_stack.push(&bools);
+                // Check if alarms have changed since last loop
+                if state.current_alarms != bools {
+                    alarms_changed = true;
+                }
+            }
+
+            // Update all standard state fields
+            state.adc_values = values;
+            state.current_alarms = bools;
+            state.battery_level = battery;
             state.tamper_detected = tamper;
             state.power_connected = power;
         }
 
+        // 4. Emit the event outside the lock (so we don't hold the mutex while sending)
+        #[cfg(feature = "transmitter")]
+        if alarms_changed {
+            let _ = ALARM_CHANNEL.try_send(bools);
+        }
+
+        // 5. Update the RUNTIME_SNAPSHOT (single lock)
         {
             let mut snapshot = RUNTIME_SNAPSHOT.lock().await;
             snapshot.battery_level = battery;
             snapshot.tamper_detected = tamper;
             snapshot.power_connected = power;
+            
             #[cfg(feature = "transmitter")]
             {
                 snapshot.adc_values = values;
@@ -261,6 +282,7 @@ async fn monitor_task(mut sensors: SystemSensors) {
             }
         }
 
+        // 6. Sleep before next tick
         Timer::after(Duration::from_millis(500)).await;
     }
 }
@@ -340,11 +362,19 @@ async fn run_logic(
         let sender_fut = Timer::at(next_sender_tick);
         let event_fut = EVENT_CHANNEL.receive();
 
+        // NEW: Select over both SimEvents and Local Alarms, mapping them to a single LogicEvent type
+        let event_fut = async {
+            match embassy_futures::select::select(EVENT_CHANNEL.receive(), ALARM_CHANNEL.receive()).await {
+                embassy_futures::select::Either::First(event) => map_sim_event(event),
+                embassy_futures::select::Either::Second(alarms) => LogicEvent::LocalAlarmsChanged(alarms),
+            }
+        };
+
         match select3(event_fut, sender_fut, watchdog_fut).await {
-            Either3::First(event) => {
+            Either3::First(logic_event) => {
                 let actions = {
                     let mut state = STATE.lock().await;
-                    handle_event(&mut state.logic, &mut dtmf_buffer, map_sim_event(event))
+                    handle_event(&mut state.logic, &mut dtmf_buffer, logic_event)
                 };
                 apply_logic_actions(
                     &actions,
@@ -467,6 +497,26 @@ async fn apply_logic_actions(
             LogicAction::SetWatchdog(timeout) => {
                 *watchdog_deadline = timeout
                     .map(|secs| Instant::now() + Duration::from_secs(secs));
+            }
+            LogicAction::UpdateLocalAlarms(alarms) => {
+                #[cfg(feature = "transmitter")]
+                {
+                    // alarms[3] holds `!tamper`. So if it's true, the housing is CLOSED.
+                    let is_housing_closed = alarms[3];
+
+                    if is_housing_closed {
+                        // Tamper is closed: Shut down all LEDs for power safety
+                        leds.set_system(PowerState::Off);
+                        leds.set_alarm1(PowerState::Off);
+                        leds.set_alarm2(PowerState::Off);
+                        leds.set_alarm3(PowerState::Off);
+                    } else {
+                        // Tamper is open: Show real-time alarm states for the installer
+                        leds.set_alarm1(if alarms[0] { PowerState::On } else { PowerState::Off });
+                        leds.set_alarm2(if alarms[1] { PowerState::On } else { PowerState::Off });
+                        leds.set_alarm3(if alarms[2] { PowerState::On } else { PowerState::Off });
+                    }
+                }
             }
         }
     }

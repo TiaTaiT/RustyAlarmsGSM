@@ -36,6 +36,7 @@ pub enum LogicEvent {
     CallEnded,
     CallExecuted(bool),
     TimeReceived(GsmTime),
+    LocalAlarmsChanged([bool; 4]),
 }
 
 const WATCHDOG_TIMEOUT_SECS: u64 = 255 * 60;
@@ -68,6 +69,7 @@ pub enum LogicAction {
     BlinkAlarm3,
     UpdateRtc(GsmTime),
     SetWatchdog(Option<u64>),
+    UpdateLocalAlarms([bool; 4]),
 }
 
 pub fn handle_event(
@@ -114,6 +116,10 @@ pub fn handle_event(
         }
         LogicEvent::TimeReceived(time) => {
             let _ = actions.push(LogicAction::UpdateRtc(time));
+        }
+        LogicEvent::LocalAlarmsChanged(alarms) => {
+            // Simply emit an action to update the LEDs
+            let _ = actions.push(LogicAction::UpdateLocalAlarms(alarms));
         }
     }
 
