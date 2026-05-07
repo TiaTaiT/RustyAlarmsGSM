@@ -32,7 +32,7 @@ mod visualization;
 mod tests;
 
 use crate::alarms_handler::{AlarmTracker};
-use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, handle_event, handle_sender_tick};
+use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, handle_event, handle_sender_tick, map_logical_to_physical_index};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
@@ -360,9 +360,8 @@ async fn run_logic(
             }
         };
         let sender_fut = Timer::at(next_sender_tick);
-        let event_fut = EVENT_CHANNEL.receive();
-
-        // NEW: Select over both SimEvents and Local Alarms, mapping them to a single LogicEvent type
+        
+        // Select over both SimEvents and Local Alarms, mapping them to a single LogicEvent type
         let event_fut = async {
             match embassy_futures::select::select(EVENT_CHANNEL.receive(), ALARM_CHANNEL.receive()).await {
                 embassy_futures::select::Either::First(event) => map_sim_event(event),
@@ -442,8 +441,9 @@ where
 
     for row in frames.iter() {
         for (idx, &active) in row.iter().enumerate() {
+            let mapped_idx = map_logical_to_physical_index(idx);
             set_output(
-                idx,
+                mapped_idx,
                 match active {
                     VisualizationState::On => PowerState::On,
                     VisualizationState::Off => PowerState::Off,

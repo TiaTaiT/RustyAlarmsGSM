@@ -1,5 +1,14 @@
 use crate::alarms_handler::AlarmTracker;
-use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, extract_alarm_payload, handle_event, handle_sender_tick};
+use crate::app_logic::{
+    LogicAction,
+    LogicCommand,
+    LogicEvent,
+    LogicState,
+    extract_alarm_payload,
+    handle_event,
+    handle_sender_tick,
+    map_logical_to_physical_index
+};
 use crate::gsm_time_converter::GsmTime;
 
 #[test]
@@ -117,6 +126,20 @@ fn local_alarms_changed_event_produces_update_action() {
         &actions[0],
         LogicAction::UpdateLocalAlarms(alarms) if alarms == &test_alarms
     ));
+}
+
+#[test]
+fn visualization_indices_map_to_correct_hardware_outputs() {
+    // Expected sequence: [Tamper, Alarm1, Alarm2, Alarm3] 
+    // Translates to:     [Relay4, Relay1, Relay2, Relay3]
+    
+    assert_eq!(map_logical_to_physical_index(0), 3, "Tamper should map to physical index 3 (4th output)");
+    assert_eq!(map_logical_to_physical_index(1), 0, "Alarm1 should map to physical index 0 (1st output)");
+    assert_eq!(map_logical_to_physical_index(2), 1, "Alarm2 should map to physical index 1 (2nd output)");
+    assert_eq!(map_logical_to_physical_index(3), 2, "Alarm3 should map to physical index 2 (3rd output)");
+    
+    // Safety check for unexpected inputs
+    assert_eq!(map_logical_to_physical_index(4), 4);
 }
 
 trait LogicStateTestExt {
