@@ -65,7 +65,6 @@ pub fn init() -> Hardware {
     let modem_ctrl = ModemControl {
         dc_power: Output::new(p.PB4, Level::High, Speed::Low),
         power_key: Output::new(p.PB6, Level::Low, Speed::Low),
-        uart_dtr: Output::new(p.PB8, Level::Low, Speed::Low),
     };
 
     let leds = StatusLeds {

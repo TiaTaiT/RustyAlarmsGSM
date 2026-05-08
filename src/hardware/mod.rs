@@ -22,4 +22,4 @@ pub use traits::{LedInterface, ModemControlInterface, ModemRxInterface, ModemTxI
 pub use traits::RelayInterface;
 #[cfg(feature = "transmitter")]
 pub use traits::AlarmControlInterface;
-pub use usb::{build_usb, BoardUsbDriver, UsbResources, UsbSerial, USB_CONNECTED, USB_STATE_SIGNAL};
+pub use usb::{build_usb, BoardUsbDriver, UsbResources, USB_CONNECTED, USB_STATE_SIGNAL};

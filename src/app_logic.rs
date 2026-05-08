@@ -5,7 +5,6 @@ use crate::constants::{
     ALARMS_MESSAGE_STRING_LENGTH, ALIVE_PERIOD_MINUTES, CALLBACK_PERIOD_MINUTES,
     DTMF_PACKET_LENGTH, SIM800_LINE_BUFFER_SIZE, SMS_DIVIDER, SMS_PREFIX,
 };
-use crate::custom_strings::extract_before_delimiter;
 use crate::date_converter::format_gsm_time;
 use crate::gsm_time_converter::GsmTime;
 use heapless::String as HeaplessString;
@@ -217,10 +216,6 @@ pub fn extract_alarm_payload(message: &str) -> Option<String<DTMF_PACKET_LENGTH>
     let mut out = String::<DTMF_PACKET_LENGTH>::new();
     out.push_str(alarm_str).ok()?;
     Some(out)
-}
-
-pub fn watchdog_timeout_seconds() -> u64 {
-    WATCHDOG_TIMEOUT_SECS
 }
 
 pub const fn map_logical_to_physical_index(logical_idx: usize) -> usize {

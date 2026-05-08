@@ -2,7 +2,6 @@
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{UartRx, UartTx};
-
 use super::traits::{ModemRxInterface, ModemTxInterface, apply_state, ModemControlInterface, PowerState};
 
 pub type ModemRx = UartRx<'static, Async>;
@@ -11,7 +10,6 @@ pub type ModemTx = UartTx<'static, Async>;
 pub struct ModemControl {
     pub(crate) dc_power: Output<'static>,
     pub(crate) power_key: Output<'static>,
-    pub(crate) uart_dtr: Output<'static>,
 }
 
 impl ModemControl {

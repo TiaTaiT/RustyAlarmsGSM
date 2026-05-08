@@ -1,7 +1,5 @@
 // /src/phone_book.rs
-
 use heapless::String;
-
 use crate::constants::MAX_PHONE_LENGTH;
 
 const MAX_PHONE_COUNT: usize = 8;
@@ -42,14 +40,6 @@ impl PhoneBook {
 
     pub fn get_first(&self) -> Option<&str> {
         self.phones.get(0).and_then(|opt| opt.as_deref())
-    }
-
-    pub fn get(&self, index: usize) -> Option<&str> {
-        if index < self.count {
-            self.phones[index].as_deref()
-        } else {
-            None
-        }
     }
 
     pub fn contains(&self, number: &str) -> bool {
