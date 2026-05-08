@@ -21,27 +21,31 @@ mod date_converter;
 mod gsm_time_converter;
 mod hardware;
 mod mcu_commands;
+mod monitoring;
 mod phone_book;
 mod runtime;
 mod sim800;
 mod sim800_logic;
 mod sim800_parser;
+mod system_state;
 mod visualization;
 
 #[cfg(test)]
 mod tests;
 
 use crate::alarms_handler::{AlarmTracker};
-use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, LogicState, handle_event, handle_sender_tick, map_logical_to_physical_index};
+use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, handle_event, handle_sender_tick, map_logical_to_physical_index};
 use crate::constants::*;
 #[cfg(feature = "receiver")]
 use crate::hardware::AlarmRelays;
 use crate::hardware::{Hardware, LedInterface, PowerState, RtcControl, StatusLeds, SystemSensors};
 #[cfg(feature = "receiver")]
 use crate::hardware::RelayInterface;
+use crate::monitoring::{MonitorUpdate, SensorSnapshot, apply_monitor_update, evaluate_monitor_update};
 use crate::runtime::{RUNTIME_SNAPSHOT, USB_RX_PIPE, USB_TX_PIPE};
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 use crate::hardware::Rtc;
+use crate::system_state::SystemState;
 use static_cell::StaticCell;
 use crate::visualization::{VisualizationState, build_visualization_frames};
 
@@ -52,23 +56,7 @@ static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
 static RTC_STATE: StaticCell<Mutex<CriticalSectionRawMutex, RtcControl>> = StaticCell::new();
 static ALARM_CHANNEL: Channel<CriticalSectionRawMutex, [bool; 4], 4> = Channel::new();
 
-struct SystemState {
-    logic: LogicState,
-    battery_level: u16,
-    tamper_detected: bool,
-    adc_values: [u16; 3],
-    current_alarms: [bool; 4],
-    power_connected: bool,
-}
-
-static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState {
-    logic: LogicState::new(),
-    battery_level: 0,
-    tamper_detected: false,
-    adc_values: [0; 3],
-    current_alarms: [false; 4],
-    power_connected: false,
-});
+static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState::new());
 
 #[cfg(feature = "receiver")]
 static RELAY_STATES: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
@@ -212,78 +200,61 @@ async fn sim800_task(
 #[embassy_executor::task]
 async fn monitor_task(mut sensors: SystemSensors) {
     loop {
-        // 1. Read all standard sensors once
-        let battery = sensors.read_battery_voltage().await;
-        let tamper = sensors.is_housing_open();
-        let power = sensors.is_power_connected();
+        let snapshot = read_sensor_snapshot(&mut sensors).await;
 
-        // 2. Conditionally read and evaluate transmitter-specific alarms
-        #[cfg(feature = "transmitter")]
-        let (values, bools) = {
-            let v = sensors.read_alarms().await;
-            let b =[
-                v[0] > LOW_INTRUSION_THRESHOLD && v[0] < HIGH_INTRUSION_THRESHOLD,
-                v[1] > LOW_INTRUSION_THRESHOLD && v[1] < HIGH_INTRUSION_THRESHOLD,
-                v[2] > LOW_INTRUSION_THRESHOLD && v[2] < HIGH_INTRUSION_THRESHOLD,
-                !tamper, // Reuse the tamper reading from above
-            ];
-            (v, b)
-        };
-
-        // If not a transmitter, define default values so the rest of the code still compiles
-        #[cfg(not(feature = "transmitter"))]
-        let (values, bools) = ([0u16; 3], [false; 4]);
-
-        let mut alarms_changed = false;
-
-        // 3. Update the global STATE (using a SINGLE lock to improve performance)
-        {
+        let update = {
             let mut state = STATE.lock().await;
+            let update = evaluate_monitor_update(&state, snapshot);
 
-            // Log tamper warning if it just happened
-            if tamper && !state.tamper_detected {
+            if update.tamper_just_detected {
                 warn!("TAMPER DETECTED!");
             }
 
             #[cfg(feature = "transmitter")]
-            {
-                state.logic.alarm_stack.push(&bools);
-                // Check if alarms have changed since last loop
-                if state.current_alarms != bools {
-                    alarms_changed = true;
-                }
-            }
+            state.logic.alarm_stack.push(&update.current_alarms);
 
-            // Update all standard state fields
-            state.adc_values = values;
-            state.current_alarms = bools;
-            state.battery_level = battery;
-            state.tamper_detected = tamper;
-            state.power_connected = power;
-        }
+            apply_monitor_update(&mut state, &update);
+            update
+        };
 
-        // 4. Emit the event outside the lock (so we don't hold the mutex while sending)
         #[cfg(feature = "transmitter")]
-        if alarms_changed {
-            let _ = ALARM_CHANNEL.try_send(bools);
+        if update.alarms_changed {
+            let _ = ALARM_CHANNEL.try_send(update.current_alarms);
         }
 
-        // 5. Update the RUNTIME_SNAPSHOT (single lock)
         {
             let mut snapshot = RUNTIME_SNAPSHOT.lock().await;
-            snapshot.battery_level = battery;
-            snapshot.tamper_detected = tamper;
-            snapshot.power_connected = power;
+            snapshot.battery_level = update.battery_level;
+            snapshot.tamper_detected = update.tamper_detected;
+            snapshot.power_connected = update.power_connected;
             
             #[cfg(feature = "transmitter")]
             {
-                snapshot.adc_values = values;
-                snapshot.current_alarms = bools;
+                snapshot.adc_values = update.adc_values;
+                snapshot.current_alarms = update.current_alarms;
             }
         }
 
-        // 6. Sleep before next tick
         Timer::after(Duration::from_millis(500)).await;
+    }
+}
+
+async fn read_sensor_snapshot(sensors: &mut SystemSensors) -> SensorSnapshot {
+    let battery_level = sensors.read_battery_voltage().await;
+    let tamper_detected = sensors.is_housing_open();
+    let power_connected = sensors.is_power_connected();
+
+    #[cfg(feature = "transmitter")]
+    let adc_values = sensors.read_alarms().await;
+
+    #[cfg(not(feature = "transmitter"))]
+    let adc_values = [0; 3];
+
+    SensorSnapshot {
+        battery_level,
+        tamper_detected,
+        power_connected,
+        adc_values,
     }
 }
 

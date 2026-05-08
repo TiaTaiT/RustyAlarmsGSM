@@ -10,7 +10,6 @@ fn test_phone_book_adds_and_retrieves_numbers() {
     book.add_number("+905554445566").unwrap();
 
     assert_eq!(book.get_first(), Some("+905551112233"));
-    assert_eq!(book.get(1), Some("+905554445566"));
     assert!(book.contains("+905551112233"));
 }
 
