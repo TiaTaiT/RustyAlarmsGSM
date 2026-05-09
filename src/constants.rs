@@ -12,6 +12,7 @@ pub const ALARMS_MESSAGE_STRING_LENGTH: usize = 4; // Matches channels
 pub const INIT_SIM800_DELAY_SECONDS: u32 = 6;
 pub const ALIVE_PERIOD_MINUTES: i32 = 120;
 pub const SYSTEM_MONITOR_PERIOD_HOURS: u32 = 12;
+pub const ALARMS_ACCUMULATE_PERIOD_SECONDS: u64 = 60;
 
 pub const SMS_PREFIX: &str = "PPP";
 pub const SMS_DIVIDER: &str = "_";

@@ -41,7 +41,7 @@ use crate::hardware::AlarmRelays;
 use crate::hardware::{Hardware, LedInterface, PowerState, RtcControl, StatusLeds, SystemSensors};
 #[cfg(feature = "receiver")]
 use crate::hardware::RelayInterface;
-use crate::monitoring::{MonitorUpdate, SensorSnapshot, apply_monitor_update, evaluate_monitor_update};
+use crate::monitoring::{SensorSnapshot, apply_monitor_update, evaluate_monitor_update};
 use crate::runtime::{RUNTIME_SNAPSHOT, USB_RX_PIPE, USB_TX_PIPE};
 use crate::sim800::{Command, Sim800Driver, SimEvent};
 use crate::hardware::Rtc;
@@ -320,7 +320,7 @@ async fn run_logic(
 ) {
     let mut watchdog_deadline: Option<Instant> = None;
     let mut dtmf_buffer = String::<DTMF_PACKET_LENGTH>::new();
-    let mut next_sender_tick = Instant::now() + Duration::from_secs(60);
+    let mut next_sender_tick = Instant::now() + Duration::from_secs(ALARMS_ACCUMULATE_PERIOD_SECONDS);
 
     loop {
         let watchdog_fut = async {
@@ -359,7 +359,7 @@ async fn run_logic(
             }
 
             Either3::Second(_) => {
-                next_sender_tick += Duration::from_secs(60);
+                next_sender_tick += Duration::from_secs(ALARMS_ACCUMULATE_PERIOD_SECONDS);
 
                 #[cfg(feature = "transmitter")]
                 {
