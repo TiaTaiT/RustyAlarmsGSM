@@ -58,6 +58,9 @@ pub fn init() -> Hardware {
     info!("Hardware initialized! Clocked at {} MHz", SYSCLK_MHZ);
 
     let alarms_ctrl = AlarmsControl {
+        // !!!!
+        // The next board revision uses PB2 instead of PB1 for the pull-up, so we set it high here to avoid floating inputs on the current revision
+        // !!!!
         alarms_pullup: Output::new(p.PB1, Level::High, Speed::Low),
         is_sms_option: Input::new(p.PB7, Pull::None),
     };
