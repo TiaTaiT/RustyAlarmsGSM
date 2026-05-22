@@ -211,7 +211,11 @@ async fn monitor_task(mut sensors: SystemSensors) {
             }
 
             #[cfg(feature = "transmitter")]
-            state.logic.alarm_stack.push(&update.current_alarms);
+            {
+                state.logic.alarm_stack.push(&update.current_alarms);
+            }
+
+            apply_monitor_update(&mut state, &update);
 
             apply_monitor_update(&mut state, &update);
             update
@@ -360,7 +364,11 @@ async fn run_logic(
             }
 
             Either3::Second(_) => {
+                let now = Instant::now();
                 next_sender_tick += Duration::from_secs(ALARMS_ACCUMULATE_PERIOD_SECONDS);
+                if next_sender_tick < now {
+                    next_sender_tick = now + Duration::from_secs(ALARMS_ACCUMULATE_PERIOD_SECONDS);
+                }
 
                 #[cfg(feature = "transmitter")]
                 {

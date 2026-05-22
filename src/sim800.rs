@@ -671,7 +671,6 @@ where
         event_channel: Sender<'static, CriticalSectionRawMutex, SimEvent, 4>,
     ) {
         self.event_channel = Some(event_channel.clone());
-        let mut uptime_sec: u64 = 0;
 
         loop {
             use embassy_futures::select::{Either3, select3};
@@ -685,7 +684,7 @@ where
                 select3(core::future::pending(), cmd_channel.receive(), usb_fut).await
             };
 
-            uptime_sec += 1;
+            let uptime_sec = embassy_time::Instant::now().as_secs();
 
             match selection {
                 Either3::First(_) => {

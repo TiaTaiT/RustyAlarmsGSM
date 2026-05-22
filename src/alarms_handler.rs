@@ -93,7 +93,11 @@ impl AlarmTracker for AlarmStack {
     }
 
     fn acknowledge_export(&mut self) {
-        self.stack[FIRST_STACK_INDEX] = self.stack[ALARMS_STACK_DEPTH - 1];
+        let latest_idx = if self.counter == 0 { 0 } else { self.counter - 1 };
+        let last_val = self.stack[latest_idx];
+        for i in 0..ALARMS_STACK_DEPTH {
+            self.stack[i] = last_val;
+        }
         self.counter = 1;
     }
 }

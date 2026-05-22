@@ -104,7 +104,6 @@ pub fn handle_event(
         }
         LogicEvent::CallExecuted(success) => {
             if success {
-                state.alarm_stack.acknowledge_export();
                 state.pending_dtmf = None;
                 state.retry_countdown = None;
                 state.pending_alive_message = false;
@@ -156,6 +155,8 @@ pub fn handle_sender_tick(
         let payload: String<DTMF_PACKET_LENGTH> = bits.iter().collect();
         state.alive_countdown = ALIVE_PERIOD_MINUTES + 1;
 
+        state.alarm_stack.acknowledge_export();
+
         if use_sms {
             if let Some(time) = current_time {
                 let mut msg = String::<SIM800_LINE_BUFFER_SIZE>::new();
@@ -173,9 +174,6 @@ pub fn handle_sender_tick(
                 let _ = actions.push(LogicAction::SendCommand(LogicCommand::SendAlarmSms {
                     message: msg,
                 }));
-                
-                // [ FIX ] - Acknowledge the export so we don't infinitely retry!
-                state.alarm_stack.acknowledge_export();
             }
         } else {
             state.pending_dtmf = Some(payload.clone());
