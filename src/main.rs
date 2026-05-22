@@ -280,7 +280,7 @@ async fn logic_task(
 ) {
     run_logic(leds, &mut relays, rtc).await;
 }
-
+/*
 #[cfg(feature = "transmitter")]
 async fn visualize_leds<L: LedInterface>(leds: &mut L, alarm_str: &str) {
     visualize_common(alarm_str, |idx, state| {
@@ -288,6 +288,7 @@ async fn visualize_leds<L: LedInterface>(leds: &mut L, alarm_str: &str) {
     })
     .await;
 }
+*/
 
 #[cfg(feature = "receiver")]
 async fn visualize_relays<L: LedInterface, R: RelayInterface>(
@@ -448,19 +449,25 @@ async fn apply_logic_actions(
     for action in actions {
         match action {
             LogicAction::Visualize(alarm_str) => {
-                #[cfg(feature = "transmitter")]
-                visualize_leds(leds, alarm_str).await;
-
                 #[cfg(feature = "receiver")]
                 visualize_relays(relays, leds, alarm_str).await;
+
+                #[cfg(feature = "transmitter")]
+                {
+                    // Transmitters only visualize their physical local alarms, not incoming payloads.
+                    let _ = alarm_str;
+                }
             }
             LogicAction::SendCommand(cmd) => {
                 CMD_CHANNEL.send(map_logic_command(cmd.clone())).await;
             }
             LogicAction::BlinkAlarm3 => {
-                leds.set_alarm3(PowerState::On);
-                Timer::after(Duration::from_secs(1)).await;
-                leds.set_alarm3(PowerState::Off);
+                #[cfg(feature = "receiver")]
+                {
+                    leds.set_alarm3(PowerState::On);
+                    Timer::after(Duration::from_secs(1)).await;
+                    leds.set_alarm3(PowerState::Off);
+                }
             }
             LogicAction::UpdateRtc(time) => {
                 let mut rtc = rtc.lock().await;
