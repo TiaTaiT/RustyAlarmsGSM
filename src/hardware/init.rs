@@ -9,6 +9,7 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::usart::{Config as UartConfig, Uart};
 use embassy_stm32::usb::Driver as UsbDriver;
 use embassy_stm32::{adc, bind_interrupts, dma, usart, usb, Config};
+use static_cell::StaticCell;
 use defmt::info;
 
 use crate::constants::SYSCLK_MHZ;
@@ -91,7 +92,7 @@ pub fn init() -> Hardware {
 
     let mut config_u2 = UartConfig::default();
     config_u2.baudrate = 9600;
-    let (modem_tx, modem_rx) = Uart::new(
+    let (modem_tx, modem_rx_raw) = Uart::new(
         p.USART2,
         p.PA3,
         p.PA2,
@@ -100,6 +101,11 @@ pub fn init() -> Hardware {
         Irqs,
         config_u2,
     ).unwrap().split();
+
+    // Statically allocate the ring buffer safely using StaticCell (no unsafe required)
+    static RX_RING_BUF: StaticCell<[u8; 512]> = StaticCell::new();
+    let rx_ring_buf = RX_RING_BUF.init([0; 512]);
+    let modem_rx = modem_rx_raw.into_ring_buffered(rx_ring_buf);
 
     let adc = Adc::new(p.ADC1, Irqs);
     let battery_pin = p.PB0.degrade_adc();

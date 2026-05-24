@@ -170,30 +170,11 @@ where
         }
     }
 
-    /// Fetches bytes using chunked DMA reading to eliminate Overrun Drops
     async fn read_byte(&mut self) -> Result<u8, SimError> {
-        loop {
-            if self.rx_buf_pos < self.rx_buf_len {
-                let b = self.rx_buf[self.rx_buf_pos];
-                self.rx_buf_pos += 1;
-                return Ok(b);
-            }
-            
-            match self.rx.read_until_idle(&mut self.rx_buf).await {
-                Ok(0) => {
-                    let mut b =[0u8; 1];
-                    self.rx.read(&mut b).await.map_err(|_| SimError::SerialError)?;
-                    self.rx_buf[0] = b[0];
-                    self.rx_buf_len = 1;
-                    self.rx_buf_pos = 0;
-                }
-                Ok(n) => {
-                    self.rx_buf_len = n;
-                    self.rx_buf_pos = 0;
-                }
-                Err(_) => return Err(SimError::SerialError),
-            }
-        }
+        let mut single_byte = [0u8; 1];
+        // The RingBufferedUartRx driver internally handles IDLE and DMA tracking
+        self.rx.read(&mut single_byte).await.map_err(|_| SimError::SerialError)?;
+        Ok(single_byte[0])
     }
 
     async fn read_line(&mut self) -> Result<String<SIM800_LINE_BUFFER_SIZE>, SimError> {

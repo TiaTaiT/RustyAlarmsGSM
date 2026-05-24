@@ -1,10 +1,10 @@
-// /src/hardware/mod.rs
+// File: src/hardware/modem.rs
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
-use embassy_stm32::usart::{UartRx, UartTx};
+use embassy_stm32::usart::{RingBufferedUartRx, UartTx}; // Changed UartRx to RingBufferedUartRx
 use super::traits::{ModemRxInterface, ModemTxInterface, apply_state, ModemControlInterface, PowerState};
 
-pub type ModemRx = UartRx<'static, Async>;
+pub type ModemRx = RingBufferedUartRx<'static>; // Changed to RingBufferedUartRx
 pub type ModemTx = UartTx<'static, Async>;
 
 pub struct ModemControl {
@@ -30,11 +30,13 @@ impl ModemTxInterface for ModemTx {
 
 impl ModemRxInterface for ModemRx {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        UartRx::read(self, buf).await.map_err(|_| ())?;
-        Ok(buf.len())
+        // Use fully qualified syntax to call the inherent method on RingBufferedUartRx
+        RingBufferedUartRx::read(self, buf).await.map_err(|_| ())
     }
 
     async fn read_until_idle(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        UartRx::read_until_idle(self, buf).await.map_err(|_| ())
+        // RingBufferedUartRx's standard read already has automatic idle line detection,
+        // so we map read_until_idle directly to it using fully qualified syntax.
+        RingBufferedUartRx::read(self, buf).await.map_err(|_| ())
     }
 }
