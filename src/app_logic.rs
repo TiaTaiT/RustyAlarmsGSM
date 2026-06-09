@@ -2,12 +2,21 @@ use heapless::String;
 
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::{
-    ALARMS_MESSAGE_STRING_LENGTH, ALIVE_PERIOD_MINUTES, CALLBACK_PERIOD_MINUTES,
-    DTMF_PACKET_LENGTH, SIM800_LINE_BUFFER_SIZE, SMS_DIVIDER, SMS_PREFIX,
+    ALARMS_MESSAGE_STRING_LENGTH,
+    ALIVE_PERIOD_MINUTES,
+    CALLBACK_PERIOD_MINUTES,
+    DTMF_PACKET_LENGTH,
+    RECEIVER_ALIVE_PERIOD_DELAY_PERCENT,
+    SIM800_LINE_BUFFER_SIZE,
+    SMS_DIVIDER,
+    SMS_PREFIX
 };
 use crate::date_converter::format_gsm_time;
 use crate::gsm_time_converter::GsmTime;
 use heapless::String as HeaplessString;
+
+const WATCHDOG_TIMEOUT_SECS: u64 = 
+    (ALIVE_PERIOD_MINUTES as f32 * (1.0 + RECEIVER_ALIVE_PERIOD_DELAY_PERCENT as f32 / 100.0) * 60.0) as u64;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum LogicCommand {
@@ -37,8 +46,6 @@ pub enum LogicEvent {
     TimeReceived(GsmTime),
     LocalAlarmsChanged([bool; 4]),
 }
-
-const WATCHDOG_TIMEOUT_SECS: u64 = 255 * 60;
 
 #[derive(Clone)]
 pub struct LogicState {
