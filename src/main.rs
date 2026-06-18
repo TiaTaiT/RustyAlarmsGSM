@@ -393,7 +393,16 @@ async fn run_logic(
             }
 
             Either3::Third(_) => {
-                info!("Watchdog expired. Resetting outputs.");
+                let time = {
+                    let rtc = rtc.lock().await;
+                    rtc.get_time()
+                };
+                let uptime = Instant::now().as_secs();
+                info!(
+                    "Watchdog expired at 20{:02}-{:02}-{:02} {:02}:{:02}:{:02} (Uptime: {}s). Resetting outputs.",
+                    time.year, time.month, time.day, time.hour, time.minute, time.second, uptime
+                );
+
                 leds.set_system(PowerState::Off);
                 leds.set_alarm1(PowerState::Off);
                 leds.set_alarm2(PowerState::Off);

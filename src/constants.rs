@@ -11,7 +11,7 @@ pub const ALARMS_MESSAGE_STRING_LENGTH: usize = 4; // Matches channels
 
 pub const INIT_SIM800_DELAY_SECONDS: u32 = 6;
 
-pub const ALIVE_PERIOD_MINUTES: i32 = 120;
+pub const ALIVE_PERIOD_MINUTES: i32 = 60;
 // Amplification factor for the receiver in percent.
 pub const RECEIVER_ALIVE_PERIOD_DELAY_PERCENT: i32 = 20;
 
