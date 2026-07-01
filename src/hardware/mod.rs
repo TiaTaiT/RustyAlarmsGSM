@@ -8,7 +8,9 @@ pub mod relays;
 pub mod sensors;
 pub mod traits;
 pub mod usb;
+pub mod eeprom;
 
+pub use eeprom::Eeprom;
 pub use alarms::AlarmsControl;
 pub use init::{init, Hardware};
 pub use leds::StatusLeds;
@@ -23,3 +25,4 @@ pub use traits::RelayInterface;
 #[cfg(feature = "transmitter")]
 pub use traits::AlarmControlInterface;
 pub use usb::{build_usb, BoardUsbDriver, UsbResources, USB_CONNECTED, USB_STATE_SIGNAL};
+

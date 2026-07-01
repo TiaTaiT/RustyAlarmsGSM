@@ -1,22 +1,13 @@
 use heapless::String;
+use crate::hardware::Eeprom;
 
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::{
-    ALARMS_MESSAGE_STRING_LENGTH,
-    ALIVE_PERIOD_MINUTES,
-    CALLBACK_PERIOD_MINUTES,
-    DTMF_PACKET_LENGTH,
-    RECEIVER_ALIVE_PERIOD_DELAY_PERCENT,
-    SIM800_LINE_BUFFER_SIZE,
-    SMS_DIVIDER,
-    SMS_PREFIX
+    ALARMS_MESSAGE_STRING_LENGTH, ALIVE_PERIOD_MINUTES, CALLBACK_PERIOD_MINUTES, DTMF_PACKET_LENGTH, RECEIVER_ALIVE_PERIOD_DELAY_PERCENT, SIM800_LINE_BUFFER_SIZE, SMS_DIVIDER, SMS_PREFIX
 };
 use crate::date_converter::format_gsm_time;
 use crate::gsm_time_converter::GsmTime;
 use heapless::String as HeaplessString;
-
-const WATCHDOG_TIMEOUT_SECS: u64 = 
-    (ALIVE_PERIOD_MINUTES as f32 * (1.0 + RECEIVER_ALIVE_PERIOD_DELAY_PERCENT as f32 / 100.0) * 60.0) as u64;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum LogicCommand {
@@ -50,7 +41,7 @@ pub enum LogicEvent {
 #[derive(Clone)]
 pub struct LogicState {
     pub alarm_stack: AlarmStack,
-    pub alive_countdown: i32,
+    pub alive_countdown: u32,
     pub pending_dtmf: Option<String<DTMF_PACKET_LENGTH>>,
     pub retry_countdown: Option<u32>,
     pub pending_alive_message: bool,
@@ -89,7 +80,7 @@ pub fn handle_event(
         LogicEvent::SmsReceived { message, .. } => {
             if let Some(alarm_str) = extract_alarm_payload(&message) {
                 let _ = actions.push(LogicAction::Visualize(alarm_str));
-                let _ = actions.push(LogicAction::SetWatchdog(Some(WATCHDOG_TIMEOUT_SECS)));
+                let _ = actions.push(LogicAction::SetWatchdog(Some(get_watchdog_timeout_secs())));
             }
         }
         LogicEvent::DtmfReceived(c) => {
@@ -97,7 +88,7 @@ pub fn handle_event(
                 let mut packet = String::<DTMF_PACKET_LENGTH>::new();
                 let _ = packet.push_str(dtmf_buffer.as_str());
                 let _ = actions.push(LogicAction::Visualize(packet));
-                let _ = actions.push(LogicAction::SetWatchdog(Some(WATCHDOG_TIMEOUT_SECS)));
+                let _ = actions.push(LogicAction::SetWatchdog(Some(get_watchdog_timeout_secs())));
                 dtmf_buffer.clear();
             }
         }
@@ -160,7 +151,7 @@ pub fn handle_sender_tick(
     } else if should_send_new {
         let bits = state.alarm_stack.export_bits();
         let payload: String<DTMF_PACKET_LENGTH> = bits.iter().collect();
-        state.alive_countdown = ALIVE_PERIOD_MINUTES + 1;
+        state.alive_countdown = Eeprom::read_alive_period() + 1;
 
         state.alarm_stack.acknowledge_export();
 
@@ -231,4 +222,21 @@ pub const fn map_logical_to_physical_index(logical_idx: usize) -> usize {
         3 => 0, // Tamper (string char 3) maps to physical output 0 (Tamper)
         _ => logical_idx, // Fallback for out-of-bounds safety
     }
+}
+
+fn get_watchdog_timeout_secs() -> u64 {
+    let mut alive_period = Eeprom::read_alive_period();
+    let mut alive_period_delay = Eeprom::read_alive_period_delay();
+
+    // Avoid potential division by zero or empty values if the EEPROM was cleared (reads as 0)
+    if alive_period == 0 {
+        // Return a safe default (e.g., 5 minutes in seconds)
+        alive_period = ALIVE_PERIOD_MINUTES;
+    }
+
+    if alive_period_delay == 0 {
+        alive_period_delay = 20 // percent
+    }
+
+    (alive_period as f32 * (1.0 + alive_period_delay as f32 / 100.0) * 60.0) as u64
 }
