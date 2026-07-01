@@ -38,3 +38,24 @@ fn formats_unknown_mcu_command() {
         "\r\nUnknown MCU command: _noop\r\n"
     );
 }
+
+#[test]
+fn formats_eeprom_mcu_commands() {
+    let snapshot = SystemSnapshot {
+        battery_level: 0,
+        tamper_detected: false,
+        power_connected: true,
+        #[cfg(feature = "transmitter")]
+        adc_values: [0, 0, 0],
+        #[cfg(feature = "transmitter")]
+        current_alarms: [false; 4],
+        #[cfg(feature = "receiver")]
+        relay_bits: 0,
+    };
+
+    assert_eq!(format_mcu_reply(&snapshot, "_alive").as_str(), "\r\n90\r\n");
+    assert_eq!(format_mcu_reply(&snapshot, "_alive=120").as_str(), "\r\nOK\r\n");
+    assert_eq!(format_mcu_reply(&snapshot, "_alive=invalid").as_str(), "\r\nERROR\r\n");
+    assert_eq!(format_mcu_reply(&snapshot, "_alivedelay").as_str(), "\r\n20\r\n");
+    assert_eq!(format_mcu_reply(&snapshot, "_alivedelay=45").as_str(), "\r\nOK\r\n");
+}

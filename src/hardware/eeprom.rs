@@ -33,7 +33,7 @@ impl Eeprom {
     }
 
     /// Write a 32-bit word to the EEPROM
-    pub fn write_u32(offset: u32, value: u32) {
+    fn write_u32(offset: u32, value: u32) {
         assert!(offset + 4 <= Self::EEPROM_SIZE, "EEPROM overflow");
         assert!(offset % 4 == 0, "Writes to u32 must be word-aligned");
 
