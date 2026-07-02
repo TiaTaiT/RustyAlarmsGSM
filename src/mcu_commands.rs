@@ -70,7 +70,7 @@ pub fn format_mcu_reply(snapshot: &SystemSnapshot, cmd: &str) -> String<128> {
             #[cfg(not(test))]
             let val = Eeprom::read_alive_period();
             #[cfg(test)]
-            let val = 90; // Default mock value for unit tests
+            let val = 90;
             let _ = write!(reply, "\r\n{}\r\n", val);
         }
         c if c.starts_with("_alive=") => {
@@ -86,13 +86,15 @@ pub fn format_mcu_reply(snapshot: &SystemSnapshot, cmd: &str) -> String<128> {
                 let _ = write!(reply, "\r\nERROR\r\n");
             }
         }
+        #[cfg(feature = "receiver")]
         "_alivedelay" => {
             #[cfg(not(test))]
             let val = Eeprom::read_alive_period_delay();
             #[cfg(test)]
-            let val = 20; // Default mock value for unit tests
+            let val = 20;
             let _ = write!(reply, "\r\n{}\r\n", val);
         }
+        #[cfg(feature = "receiver")]
         c if c.starts_with("_alivedelay=") => {
             if let Some(val_str) = c.strip_prefix("_alivedelay=") {
                 if let Ok(val) = val_str.parse::<u32>() {
@@ -105,6 +107,9 @@ pub fn format_mcu_reply(snapshot: &SystemSnapshot, cmd: &str) -> String<128> {
             } else {
                 let _ = write!(reply, "\r\nERROR\r\n");
             }
+        }
+        "_reboot" => {
+            let _ = write!(reply, "\r\nOK\r\n");
         }
         _ => {
             let _ = write!(reply, "\r\nUnknown MCU command: {}\r\n", cmd_trimmed);

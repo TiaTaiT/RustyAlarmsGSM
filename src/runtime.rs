@@ -1,3 +1,4 @@
+// File: src/runtime.rs
 #[cfg(not(test))]
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(not(test))]
@@ -63,6 +64,13 @@ pub async fn execute_mcu_command(cmd: &str) {
     );
 
     write_usb_reply(&reply).await;
+
+    if cmd.trim_end() == "_reboot" {
+        // Pause briefly to give the USB stack sufficient time to flush the packet to the PC
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        #[cfg(not(test))]
+        cortex_m::peripheral::SCB::sys_reset();
+    }
 }
 
 #[cfg(not(test))]

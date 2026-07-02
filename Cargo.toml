@@ -45,7 +45,7 @@ log = "0.4.29"
 
 
 [features]
-default = ["receiver"]
+default = ["transmitter"]
 
 transmitter = []
 receiver = []
