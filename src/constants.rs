@@ -31,6 +31,7 @@ pub const SIM800_LINE_BUFFER_SIZE: usize = 64;
 pub const SIM800_SMS_SIZE: usize = 64; // Must be less than SIM800_LINE_BUFFER_SIZE
 
 pub const BATTERY_VOLTAGE_FACTOR: f32 = 9.155;
+pub const BATTERY_UNDERVOLTAGE_THRESHOLD: f32 = 6.0; // volts
 pub const RELAYS_FRAME_DURATION_SECONDS: u64 = 3; // Delay between relays states update
 
 pub const CALLBACK_PERIOD_MINUTES: u32 = 5;
