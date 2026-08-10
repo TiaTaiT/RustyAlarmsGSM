@@ -4,7 +4,7 @@ use crate::system_state::SystemState;
 
 #[test]
 fn build_alarm_state_uses_thresholds_and_closed_tamper_flag() {
-    let alarms = build_alarm_state([1500, 500, 2999], false);
+    let alarms = build_alarm_state([1500, 500, 2999], 6001, false);
     assert_eq!(alarms, [true, false, true, true]);
 }
 

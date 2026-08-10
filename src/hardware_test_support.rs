@@ -99,3 +99,19 @@ impl ModemControlInterface for ModemControl {
         self.dc_power_states.push(state);
     }
 }
+
+pub struct Eeprom;
+
+impl Eeprom {
+    pub fn read_alive_period() -> u32 {
+        90
+    }
+
+    pub fn read_alive_period_delay() -> u32 {
+        20
+    }
+
+    pub fn write_alive_period(_value: u32) {}
+
+    pub fn write_alive_period_delay(_value: u32) {}
+}

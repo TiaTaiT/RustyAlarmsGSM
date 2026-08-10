@@ -23,6 +23,7 @@ pub mod hardware;
 
 #[cfg(test)]
 pub mod hardware {
+    pub use crate::hardware_test_support::Eeprom;
     pub use crate::hardware_test_support::{ModemControl, ModemRx, ModemTx};
     pub use crate::hardware_test_support::{ModemControlInterface, ModemRxInterface, ModemTxInterface, PowerState};
 }

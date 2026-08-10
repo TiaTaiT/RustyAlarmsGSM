@@ -1,4 +1,4 @@
-use crate::constants::{HIGH_INTRUSION_THRESHOLD, LOW_INTRUSION_THRESHOLD};
+use crate::constants::{BATTERY_UNDERVOLTAGE_THRESHOLD, HIGH_INTRUSION_THRESHOLD, LOW_INTRUSION_THRESHOLD};
 use crate::system_state::SystemState;
 
 pub struct SensorSnapshot {
@@ -22,7 +22,10 @@ pub fn evaluate_monitor_update(
     previous: &SystemState,
     snapshot: SensorSnapshot,
 ) -> MonitorUpdate {
-    let current_alarms = build_alarm_state(snapshot.adc_values, snapshot.tamper_detected);
+    let current_alarms = build_alarm_state(
+        snapshot.adc_values, 
+        snapshot.battery_level, 
+        snapshot.tamper_detected);
 
     MonitorUpdate {
         adc_values: snapshot.adc_values,
@@ -43,15 +46,22 @@ pub fn apply_monitor_update(state: &mut SystemState, update: &MonitorUpdate) {
     state.power_connected = update.power_connected;
 }
 
-pub fn build_alarm_state(adc_values: [u16; 3], tamper_detected: bool) -> [bool; 4] {
+pub fn build_alarm_state(
+    adc_values: [u16; 3],
+    battery_level: u16,
+    tamper_detected: bool) -> [bool; 4] {
     [
         is_intrusion_active(adc_values[0]),
         is_intrusion_active(adc_values[1]),
-        is_intrusion_active(adc_values[2]),
-        !tamper_detected,
+        is_intrusion_active(adc_values[2]) &  !tamper_detected,
+        is_battery_ok(battery_level)
     ]
 }
 
 fn is_intrusion_active(value: u16) -> bool {
     value > LOW_INTRUSION_THRESHOLD && value < HIGH_INTRUSION_THRESHOLD
+}
+
+fn is_battery_ok(value: u16) -> bool {
+    value >= BATTERY_UNDERVOLTAGE_THRESHOLD
 }
