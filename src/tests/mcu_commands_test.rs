@@ -56,6 +56,8 @@ fn formats_eeprom_mcu_commands() {
     assert_eq!(format_mcu_reply(&snapshot, "_alive").as_str(), "\r\n90\r\n");
     assert_eq!(format_mcu_reply(&snapshot, "_alive=120").as_str(), "\r\nOK\r\n");
     assert_eq!(format_mcu_reply(&snapshot, "_alive=invalid").as_str(), "\r\nERROR\r\n");
+    #[cfg(feature = "receiver")]
     assert_eq!(format_mcu_reply(&snapshot, "_alivedelay").as_str(), "\r\n20\r\n");
+    #[cfg(feature = "receiver")]
     assert_eq!(format_mcu_reply(&snapshot, "_alivedelay=45").as_str(), "\r\nOK\r\n");
 }
