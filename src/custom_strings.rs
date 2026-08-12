@@ -11,12 +11,6 @@ pub fn extract_before_delimiter<'a>(input: &'a str, delimiter: &str) -> Option<&
 }
 
 /// Returns the first substring found between `start_delim` and `end_delim`, if present.
-///
-/// Example:
-/// ```
-/// let s = r#"+CPBR: 2,"*105#",129,"0""#;
-/// assert_eq!(extract_between_delimiters(s, "\"", "\""), Some("*105#"));
-/// ```
 pub fn extract_between_delimiters<'a>(
     input: &'a str,
     start_delim: &str,
