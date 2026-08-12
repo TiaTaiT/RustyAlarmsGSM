@@ -1,4 +1,5 @@
 // /src/custom_strings.rs
+
 /// Returns the substring after `delimiter`, if present.
 pub fn extract_after_delimiter<'a>(input: &'a str, delimiter: &str) -> Option<&'a str> {
     input.split_once(delimiter).map(|(_, suffix)| suffix)

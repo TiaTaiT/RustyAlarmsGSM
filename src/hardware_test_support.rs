@@ -50,8 +50,7 @@ pub struct ModemRx {
 
 #[derive(Default)]
 struct MockRxState {
-    idle_reads: VecDeque<Result<Vec<u8>, ()>>,
-    reads: VecDeque<Result<Vec<u8>, ()>>,
+    buffer: VecDeque<u8>,
 }
 
 impl ModemRx {
@@ -60,27 +59,29 @@ impl ModemRx {
     }
 
     pub fn push_idle_read(&self, data: &[u8]) {
-        self.state.lock().unwrap().idle_reads.push_back(Ok(data.to_vec()));
+        self.state.lock().unwrap().buffer.extend(data);
     }
 
     pub fn push_read(&self, data: &[u8]) {
-        self.state.lock().unwrap().reads.push_back(Ok(data.to_vec()));
+        self.state.lock().unwrap().buffer.extend(data);
     }
 }
 
 impl ModemRxInterface for ModemRx {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        let next = self.state.lock().unwrap().reads.pop_front().ok_or(())??;
-        let len = next.len().min(buf.len());
-        buf[..len].copy_from_slice(&next[..len]);
-        Ok(len)
+        let mut state = self.state.lock().unwrap();
+        if state.buffer.is_empty() {
+            return Err(());
+        }
+        let count = buf.len().min(state.buffer.len());
+        for i in 0..count {
+            buf[i] = state.buffer.pop_front().unwrap();
+        }
+        Ok(count)
     }
 
     async fn read_until_idle(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        let next = self.state.lock().unwrap().idle_reads.pop_front().ok_or(())??;
-        let len = next.len().min(buf.len());
-        buf[..len].copy_from_slice(&next[..len]);
-        Ok(len)
+        self.read(buf).await
     }
 }
 
