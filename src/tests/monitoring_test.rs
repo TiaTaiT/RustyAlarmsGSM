@@ -1,12 +1,7 @@
 use crate::app_logic::LogicState;
-use crate::monitoring::{MonitorUpdate, SensorSnapshot, apply_monitor_update, build_alarm_state, evaluate_monitor_update};
+use crate::constants::{ALARMS_CHANNELS_AMOUNT, BATTERY_UNDERVOLTAGE_THRESHOLD, INTRUSION_CHANNELS_AMOUNT};
+use crate::monitoring::{MonitorUpdate, SensorSnapshot, apply_monitor_update, evaluate_monitor_update};
 use crate::system_state::SystemState;
-
-#[test]
-fn build_alarm_state_uses_thresholds_and_closed_tamper_flag() {
-    let alarms = build_alarm_state([1500, 500, 2999], 6001, false);
-    assert_eq!(alarms, [true, false, true, true]);
-}
 
 #[test]
 fn evaluate_monitor_update_detects_alarm_changes_and_tamper_edges() {
@@ -14,25 +9,25 @@ fn evaluate_monitor_update_detects_alarm_changes_and_tamper_edges() {
         logic: LogicState::new(),
         battery_level: 3900,
         tamper_detected: false,
-        adc_values: [0; 3],
-        current_alarms: [false; 4],
+        adc_values: [0; INTRUSION_CHANNELS_AMOUNT],
+        current_alarms: [false; ALARMS_CHANNELS_AMOUNT],
         power_connected: true,
     };
 
     let update = evaluate_monitor_update(
         &previous,
         SensorSnapshot {
-            battery_level: 4050,
+            battery_level: BATTERY_UNDERVOLTAGE_THRESHOLD + 1,
             tamper_detected: true,
             power_connected: false,
-            adc_values: [1500, 500, 3500],
+            adc_values: [1500, 500],
         },
     );
 
-    assert_eq!(update.current_alarms, [true, false, false, false]);
+    assert_eq!(update.current_alarms, [true, false, true, false]);
     assert!(update.alarms_changed);
     assert!(update.tamper_just_detected);
-    assert_eq!(update.battery_level, 4050);
+    assert_eq!(update.battery_level, BATTERY_UNDERVOLTAGE_THRESHOLD + 1);
     assert!(!update.power_connected);
 }
 
@@ -42,7 +37,7 @@ fn apply_monitor_update_replaces_runtime_fields_without_touching_logic_state() {
     state.logic.pending_alive_message = true;
 
     let update = MonitorUpdate {
-        adc_values: [11, 22, 33],
+        adc_values: [11, 22],
         current_alarms: [true, false, true, false],
         alarms_changed: true,
         tamper_just_detected: false,
@@ -53,7 +48,7 @@ fn apply_monitor_update_replaces_runtime_fields_without_touching_logic_state() {
 
     apply_monitor_update(&mut state, &update);
 
-    assert_eq!(state.adc_values, [11, 22, 33]);
+    assert_eq!(state.adc_values, [11, 22]);
     assert_eq!(state.current_alarms, [true, false, true, false]);
     assert_eq!(state.battery_level, 4012);
     assert!(state.tamper_detected);

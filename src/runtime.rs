@@ -9,6 +9,9 @@ use embassy_sync::pipe::Pipe;
 use heapless::String;
 
 #[cfg(not(test))]
+#[cfg(feature = "transmitter")]
+use crate::constants::{ALARMS_CHANNELS_AMOUNT, INTRUSION_CHANNELS_AMOUNT};
+#[cfg(not(test))]
 use crate::mcu_commands::{SystemSnapshot, format_mcu_reply};
 
 #[cfg(not(test))]
@@ -22,9 +25,9 @@ pub struct RuntimeSnapshot {
     pub tamper_detected: bool,
     pub power_connected: bool,
     #[cfg(feature = "transmitter")]
-    pub adc_values: [u16; 3],
+    pub adc_values: [u16; INTRUSION_CHANNELS_AMOUNT],
     #[cfg(feature = "transmitter")]
-    pub current_alarms: [bool; 4],
+    pub current_alarms: [bool; ALARMS_CHANNELS_AMOUNT],
     #[cfg(feature = "receiver")]
     pub relay_bits: u8,
 }
@@ -35,9 +38,9 @@ pub static RUNTIME_SNAPSHOT: Mutex<CriticalSectionRawMutex, RuntimeSnapshot> = M
     tamper_detected: false,
     power_connected: false,
     #[cfg(feature = "transmitter")]
-    adc_values: [0; 3],
+    adc_values: [0; INTRUSION_CHANNELS_AMOUNT],
     #[cfg(feature = "transmitter")]
-    current_alarms: [false; 4],
+    current_alarms: [false; ALARMS_CHANNELS_AMOUNT],
     #[cfg(feature = "receiver")]
     relay_bits: 0,
 });

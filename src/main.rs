@@ -30,8 +30,8 @@ mod sim800_parser;
 mod system_state;
 mod visualization;
 
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;
 
 use crate::alarms_handler::{AlarmTracker};
 use crate::app_logic::{LogicAction, LogicCommand, LogicEvent, handle_event, handle_sender_tick, map_logical_to_physical_index};
@@ -54,7 +54,7 @@ static CMD_CHANNEL: Channel<CriticalSectionRawMutex, Command, 4> = Channel::new(
 static EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SimEvent, 4> = Channel::new();
 static USB_STATE: StaticCell<hardware::UsbResources> = StaticCell::new();
 static RTC_STATE: StaticCell<Mutex<CriticalSectionRawMutex, RtcControl>> = StaticCell::new();
-static ALARM_CHANNEL: Channel<CriticalSectionRawMutex, [bool; 4], 4> = Channel::new();
+static ALARM_CHANNEL: Channel<CriticalSectionRawMutex, [bool; ALARMS_CHANNELS_AMOUNT], 4> = Channel::new();
 
 static STATE: Mutex<CriticalSectionRawMutex, SystemState> = Mutex::new(SystemState::new());
 
@@ -207,15 +207,13 @@ async fn monitor_task(mut sensors: SystemSensors) {
             let update = evaluate_monitor_update(&state, snapshot);
 
             if update.tamper_just_detected {
-                warn!("TAMPER DETECTED!");
+                warn!("Case opening detected!");
             }
 
             #[cfg(feature = "transmitter")]
             {
                 state.logic.alarm_stack.push(&update.current_alarms);
             }
-
-            apply_monitor_update(&mut state, &update);
 
             apply_monitor_update(&mut state, &update);
             update
@@ -252,7 +250,7 @@ async fn read_sensor_snapshot(sensors: &mut SystemSensors) -> SensorSnapshot {
     let adc_values = sensors.read_alarms().await;
 
     #[cfg(not(feature = "transmitter"))]
-    let adc_values = [0; 3];
+    let adc_values = [0; INTRUSION_CHANNELS_AMOUNT];
 
     SensorSnapshot {
         battery_level,

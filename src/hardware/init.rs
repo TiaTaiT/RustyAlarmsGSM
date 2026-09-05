@@ -114,7 +114,7 @@ pub fn init() -> Hardware {
 
     #[cfg(feature = "transmitter")]
     let sensors = SystemSensors {
-        alarms: [p.PA4.degrade_adc(), p.PA5.degrade_adc(), p.PA6.degrade_adc()],
+        alarms: [p.PA5.degrade_adc(), p.PA6.degrade_adc()],
         adc,
         battery_pin,
         power_good_pin,

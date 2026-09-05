@@ -1,14 +1,14 @@
 [package]
-name = "embassy800c"
+name = "RustyAlarmsGSM"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95.0"
+rust-version = "1.97.1"
 
 [package.metadata.probe-rs]
-minimum-version = "0.31.0"
+minimum-version = "0.32.0"
 
 [[bin]]
-name = "embassy800c"
+name = "rusty_alarms_gsm"
 path = "src/main.rs"
 test = false
 bench = false
@@ -45,7 +45,7 @@ log = "0.4.29"
 
 
 [features]
-default = ["transmitter"]
+default = ["receiver"]
 
 transmitter = []
 receiver = []

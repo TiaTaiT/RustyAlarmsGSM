@@ -3,7 +3,15 @@ use crate::hardware::Eeprom;
 
 use crate::alarms_handler::{AlarmStack, AlarmTracker};
 use crate::constants::{
-    ALARMS_MESSAGE_STRING_LENGTH, ALIVE_PERIOD_MINUTES, CALLBACK_PERIOD_MINUTES, DTMF_PACKET_LENGTH, RECEIVER_ALIVE_PERIOD_DELAY_PERCENT, SIM800_LINE_BUFFER_SIZE, SMS_DIVIDER, SMS_PREFIX
+    ALARMS_CHANNELS_AMOUNT,
+    ALARMS_MESSAGE_STRING_LENGTH,
+    ALIVE_PERIOD_MINUTES,
+    CALLBACK_PERIOD_MINUTES,
+    DTMF_PACKET_LENGTH,
+    RECEIVER_ALIVE_PERIOD_DELAY_PERCENT,
+    SIM800_LINE_BUFFER_SIZE,
+    SMS_DIVIDER,
+    SMS_PREFIX
 };
 use crate::date_converter::format_gsm_time;
 use crate::gsm_time_converter::GsmTime;
@@ -35,7 +43,7 @@ pub enum LogicEvent {
     CallEnded,
     CallExecuted(bool),
     TimeReceived(GsmTime),
-    LocalAlarmsChanged([bool; 4]),
+    LocalAlarmsChanged([bool; ALARMS_CHANNELS_AMOUNT]),
 }
 
 #[derive(Clone)]
@@ -66,7 +74,7 @@ pub enum LogicAction {
     BlinkAlarm3,
     UpdateRtc(GsmTime),
     SetWatchdog(Option<u64>),
-    UpdateLocalAlarms([bool; 4]),
+    UpdateLocalAlarms([bool; ALARMS_CHANNELS_AMOUNT]),
 }
 
 pub fn handle_event(

@@ -6,6 +6,7 @@ pub const HIGH_INTRUSION_THRESHOLD: u16 = 3000;
 
 // Updated to 4 channels for the new board
 pub const ALARMS_CHANNELS_AMOUNT: usize = 4;
+pub const INTRUSION_CHANNELS_AMOUNT: usize = 2; // Only the first two channels are intrusion sensors
 pub const ALARMS_STACK_DEPTH: usize = 3;
 pub const ALARMS_MESSAGE_STRING_LENGTH: usize = 4; // Matches channels
 
@@ -31,7 +32,7 @@ pub const SIM800_LINE_BUFFER_SIZE: usize = 64;
 pub const SIM800_SMS_SIZE: usize = 64; // Must be less than SIM800_LINE_BUFFER_SIZE
 
 pub const BATTERY_VOLTAGE_FACTOR: f32 = 9.155;
-pub const BATTERY_UNDERVOLTAGE_THRESHOLD: u16 = 6000; // millivolts
+pub const BATTERY_UNDERVOLTAGE_THRESHOLD: u16 = 7000; // millivolts
 pub const RELAYS_FRAME_DURATION_SECONDS: u64 = 3; // Delay between relays states update
 
 pub const CALLBACK_PERIOD_MINUTES: u32 = 5;

@@ -4,12 +4,14 @@ use embassy_stm32::gpio::Input;
 use embassy_stm32::peripherals::ADC1;
 
 use crate::constants::BATTERY_VOLTAGE_FACTOR;
+#[cfg(feature = "transmitter")]
+use crate::constants::INTRUSION_CHANNELS_AMOUNT;
 
 use super::traits::SensorInterface;
 
 pub struct SystemSensors {
     #[cfg(feature = "transmitter")]
-    pub(crate) alarms: [AnyAdcChannel<'static, ADC1>; 3],
+    pub(crate) alarms: [AnyAdcChannel<'static, ADC1>; INTRUSION_CHANNELS_AMOUNT],
     pub(crate) adc: Adc<'static, ADC1>,
     pub(crate) battery_pin: AnyAdcChannel<'static, ADC1>,
     pub(crate) power_good_pin: Input<'static>,
@@ -18,11 +20,10 @@ pub struct SystemSensors {
 
 impl SystemSensors {
     #[cfg(feature = "transmitter")]
-    pub async fn read_alarms(&mut self) -> [u16; 3] {
+    pub async fn read_alarms(&mut self) -> [u16; INTRUSION_CHANNELS_AMOUNT] {
         let v0 = self.adc.read(&mut self.alarms[0], SampleTime::CYCLES160_5).await;
         let v1 = self.adc.read(&mut self.alarms[1], SampleTime::CYCLES160_5).await;
-        let v2 = self.adc.read(&mut self.alarms[2], SampleTime::CYCLES160_5).await;
-        [v0, v1, v2]
+        [v0, v1]
     }
 
     pub async fn read_battery_voltage(&mut self) -> u16 {
@@ -35,7 +36,10 @@ impl SystemSensors {
 
 impl SensorInterface for SystemSensors {
     #[cfg(feature = "transmitter")]
-    async fn read_alarms(&mut self) -> [u16; 3] { SystemSensors::read_alarms(self).await }
+    async fn read_alarms(&mut self) -> [u16; INTRUSION_CHANNELS_AMOUNT] 
+    {
+        SystemSensors::read_alarms(self).await
+    }
 
     async fn read_battery_voltage(&mut self) -> u16 { SystemSensors::read_battery_voltage(self).await }
     fn is_power_connected(&self) -> bool { SystemSensors::is_power_connected(self) }

@@ -1,6 +1,8 @@
 // /src/hardware/traits.rs
 #![allow(async_fn_in_trait)]
 use embassy_stm32::gpio::Output;
+#[cfg(feature = "transmitter")]
+use crate::constants::INTRUSION_CHANNELS_AMOUNT;
 use crate::gsm_time_converter::GsmTime;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -48,7 +50,7 @@ pub trait RelayInterface {
 
 pub trait SensorInterface {
     #[cfg(feature = "transmitter")]
-    async fn read_alarms(&mut self) -> [u16; 3];
+    async fn read_alarms(&mut self) -> [u16; INTRUSION_CHANNELS_AMOUNT];
 
     async fn read_battery_voltage(&mut self) -> u16;
     fn is_power_connected(&self) -> bool;

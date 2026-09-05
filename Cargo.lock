@@ -3,6 +3,28 @@
 version = 4
 
 [[package]]
+name = "RustyAlarmsGSM"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-usb",
+ "embedded-io-async 0.7.0",
+ "heapless 0.9.3",
+ "log",
+ "panic-probe",
+ "portable-atomic",
+ "static_cell",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -481,28 +503,6 @@ dependencies = [
  "critical-section",
  "embassy-sync",
  "embassy-usb-driver",
-]
-
-[[package]]
-name = "embassy800c"
-version = "0.1.0"
-dependencies = [
- "cortex-m",
- "cortex-m-rt",
- "defmt",
- "defmt-rtt",
- "embassy-executor",
- "embassy-futures",
- "embassy-stm32",
- "embassy-sync",
- "embassy-time",
- "embassy-usb",
- "embedded-io-async 0.7.0",
- "heapless 0.9.3",
- "log",
- "panic-probe",
- "portable-atomic",
- "static_cell",
 ]
 
 [[package]]

@@ -2,6 +2,8 @@
 // Use this file for all USB terminal command handlers
 use heapless::String;
 
+#[cfg(feature = "transmitter")]
+use crate::constants::{ALARMS_CHANNELS_AMOUNT, INTRUSION_CHANNELS_AMOUNT};
 #[cfg(not(test))]
 use crate::hardware::Eeprom;
 
@@ -11,9 +13,9 @@ pub struct SystemSnapshot {
     pub tamper_detected: bool,
     pub power_connected: bool,
     #[cfg(feature = "transmitter")]
-    pub adc_values: [u16; 3],
+    pub adc_values: [u16; INTRUSION_CHANNELS_AMOUNT],
     #[cfg(feature = "transmitter")]
-    pub current_alarms: [bool; 4],
+    pub current_alarms: [bool; ALARMS_CHANNELS_AMOUNT],
     #[cfg(feature = "receiver")]
     pub relay_bits: u8,
 }
@@ -37,7 +39,7 @@ pub fn format_mcu_reply(snapshot: &SystemSnapshot, cmd: &str) -> String<128> {
         #[cfg(feature = "transmitter")]
         "_adc" => {
             let v = snapshot.adc_values;
-            let _ = write!(reply, "\r\nADC: {}, {}, {}\r\n", v[0], v[1], v[2]);
+            let _ = write!(reply, "\r\nADC: {}, {}\r\n", v[0], v[1]);
         }
         #[cfg(feature = "receiver")]
         "_relays" => {

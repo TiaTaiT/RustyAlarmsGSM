@@ -1,3 +1,5 @@
+#[cfg(feature = "transmitter")]
+use crate::constants::ALARMS_CHANNELS_AMOUNT;
 use crate::mcu_commands::{SystemSnapshot, format_mcu_reply};
 
 #[test]
@@ -7,7 +9,7 @@ fn formats_common_mcu_replies() {
         tamper_detected: true,
         power_connected: false,
         #[cfg(feature = "transmitter")]
-        adc_values: [1, 2, 3],
+        adc_values: [1, 2],
         #[cfg(feature = "transmitter")]
         current_alarms: [true, false, true, false],
         #[cfg(feature = "receiver")]
@@ -26,9 +28,9 @@ fn formats_unknown_mcu_command() {
         tamper_detected: false,
         power_connected: true,
         #[cfg(feature = "transmitter")]
-        adc_values: [0, 0, 0],
+        adc_values: [0, 0],
         #[cfg(feature = "transmitter")]
-        current_alarms: [false; 4],
+        current_alarms: [false; ALARMS_CHANNELS_AMOUNT],
         #[cfg(feature = "receiver")]
         relay_bits: 0,
     };
@@ -46,9 +48,9 @@ fn formats_eeprom_mcu_commands() {
         tamper_detected: false,
         power_connected: true,
         #[cfg(feature = "transmitter")]
-        adc_values: [0, 0, 0],
+        adc_values: [0, 0],
         #[cfg(feature = "transmitter")]
-        current_alarms: [false; 4],
+        current_alarms: [false; ALARMS_CHANNELS_AMOUNT],
         #[cfg(feature = "receiver")]
         relay_bits: 0,
     };
